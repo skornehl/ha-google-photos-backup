@@ -225,9 +225,19 @@ class LibraryApiBackend(BackupBackend):
         def _write() -> int:
             dest_dir = dest_dir_for_date(target_dir, taken_at)
             dest = unique_destination(dest_dir, filename)
-            dest.write_bytes(raw)
-            ts = taken_at.timestamp()
-            os.utime(dest, (ts, ts))
+            # Write to a .part sibling and only rename onto the final name
+            # once fully written - a process kill mid-write can then never
+            # leave a truncated file sitting at the name the rest of the
+            # code treats as "this photo is done" (see issue #9).
+            tmp_path = dest.with_name(dest.name + ".part")
+            try:
+                tmp_path.write_bytes(raw)
+                ts = taken_at.timestamp()
+                os.utime(tmp_path, (ts, ts))
+                os.replace(tmp_path, dest)
+            except BaseException:
+                tmp_path.unlink(missing_ok=True)
+                raise
             return len(raw)
 
         size = await self.hass.async_add_executor_job(_write)

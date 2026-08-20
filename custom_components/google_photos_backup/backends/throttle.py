@@ -9,6 +9,7 @@ into memory as a whole).
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 from aiohttp import ClientResponse
@@ -67,36 +68,52 @@ async def throttled_stream_to_file(
     chunk_size: int = DOWNLOAD_CHUNK_SIZE,
     flush_size: int = DRIVE_DOWNLOAD_FLUSH_SIZE,
 ) -> int:
-    """Stream resp's body straight to dest_path, paced to `limit_kbps`
-    (KiB/s, <=0 = unlimited). Buffers up to `flush_size` in memory before
-    each blocking write, so a multi-GB archive stays bounded to
-    `flush_size` of RAM instead of being held in full, while still
-    avoiding a write (and executor round-trip) per single network chunk.
-    Returns the total number of bytes written.
+    """Stream resp's body to dest_path, paced to `limit_kbps` (KiB/s,
+    <=0 = unlimited). Buffers up to `flush_size` in memory before each
+    blocking write, so a multi-GB archive stays bounded to `flush_size` of
+    RAM instead of being held in full, while still avoiding a write (and
+    executor round-trip) per single network chunk. Returns the total
+    number of bytes written.
+
+    Writes to a `<dest_path>.part` sibling and only `os.replace()`s it
+    onto `dest_path` after the transfer completes fully - so a process
+    kill/restart mid-download (network exceptions are already handled by
+    the caller) can never leave a truncated, corrupt file sitting at the
+    filename callers treat as "this archive is done" (see issue #9). On
+    any exception, the partial `.part` file is removed rather than left
+    behind for a future run to trip over.
     """
+    tmp_path = dest_path.with_name(dest_path.name + ".part")
     pacer = _Pacer(limit_kbps) if limit_kbps > 0 else None
     buffer = bytearray()
     total = 0
     wrote_anything = False
 
     def _flush(data: bytes, mode: str) -> None:
-        with open(dest_path, mode) as fh:
+        with open(tmp_path, mode) as fh:
             fh.write(data)
 
-    async for chunk in resp.content.iter_chunked(chunk_size):
-        buffer.extend(chunk)
-        total += len(chunk)
-        if pacer is not None:
-            await pacer.account(len(chunk))
-        if len(buffer) >= flush_size:
+    try:
+        async for chunk in resp.content.iter_chunked(chunk_size):
+            buffer.extend(chunk)
+            total += len(chunk)
+            if pacer is not None:
+                await pacer.account(len(chunk))
+            if len(buffer) >= flush_size:
+                await hass.async_add_executor_job(
+                    _flush, bytes(buffer), "ab" if wrote_anything else "wb"
+                )
+                wrote_anything = True
+                buffer.clear()
+
+        if buffer or not wrote_anything:
             await hass.async_add_executor_job(
                 _flush, bytes(buffer), "ab" if wrote_anything else "wb"
             )
-            wrote_anything = True
-            buffer.clear()
 
-    if buffer or not wrote_anything:
-        await hass.async_add_executor_job(
-            _flush, bytes(buffer), "ab" if wrote_anything else "wb"
-        )
+        await hass.async_add_executor_job(os.replace, tmp_path, dest_path)
+    except BaseException:
+        await hass.async_add_executor_job(tmp_path.unlink, True)
+        raise
+
     return total
