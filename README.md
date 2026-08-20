@@ -17,7 +17,7 @@ Assistant. Installable via HACS (custom repository).
 ```
 custom_components/google_photos_backup/
 ├── __init__.py              # async_setup_entry/async_unload_entry, services
-├── application_credentials.py  # Google OAuth2 endpoints (library_api only)
+├── application_credentials.py  # Google OAuth2 endpoints (library_api + takeout's Drive sync)
 ├── config_flow.py           # backend selection + backend-specific options
 ├── const.py
 ├── coordinator.py           # DataUpdateCoordinator, persisted sync state
@@ -27,9 +27,10 @@ custom_components/google_photos_backup/
 └── backends/
     ├── base.py               # BackupBackend ABC, BackupStats, SyncStateStore
     ├── fsutil.py             # shared file/folder/hash logic
+    ├── throttle.py            # shared bandwidth-limited HTTP reads (library_api, takeout)
     ├── library_api.py        # Library API (app-owned) + Picker API
     ├── rclone_backend.py     # subprocess wrapper around `rclone`
-    └── takeout_backend.py    # Takeout archive import
+    └── takeout_backend.py    # Takeout archive import, optional download-link fetch + Drive sync
 ```
 
 Each backend implements the same `BackupBackend` interface
@@ -84,22 +85,21 @@ to quickly back up recent photos on demand without waiting for the next
 
 ### Bandwidth limiting
 
-`library_api` and `rclone` both offer a **Bandwidth limit (KiB/s)** field
-during setup, and it can be changed afterwards via Settings → Devices &
-Services → Google Photos Backup → Configure - no need to re-run the whole
-setup. `0` (the default) means unlimited. Useful for a large initial
-backup so it doesn't saturate the rest of your connection for hours.
+Every backend offers a **Bandwidth limit (KiB/s)** field during setup, and
+it can be changed afterwards via Settings → Devices & Services → Google
+Photos Backup → Configure - no need to re-run the whole setup. `0` (the
+default) means unlimited. Useful for a large initial backup (easily a TB+
+for a big photo library) so it doesn't saturate the rest of your
+connection for hours.
 
 - `library_api`: throttled in Python while streaming each photo/video
   download.
 - `rclone`: passed straight through to rclone's own `--bwlimit` flag.
-
-`takeout` doesn't offer this option because it never talks to the network
-itself - it only reads archives you (or a separate sync step) already
-placed into `takeout_watch_dir`. If you need to throttle *that* transfer,
-limit it at the tool that downloads the archives into the watch
-directory (e.g. your rclone Drive remote, or your browser/download
-manager).
+- `takeout`: applies to its own network transfers - downloading archives
+  from a pasted email link, and/or from Google Drive if Drive sync is
+  enabled (see below). It's a no-op if you only ever drop archives into
+  `takeout_watch_dir` manually, since that path never touches the network
+  at all.
 
 ### Backend 1: library_api (Google Cloud OAuth)
 
@@ -148,15 +148,70 @@ through this exact rclone remote - see rclone docs
 2. Optional but recommended: set up a recurring backup under "Scheduled
    exports" (every 2 months, 1 year) and choose Drive/Dropbox/OneDrive/Box
    as the destination.
-3. Place finished archives into the configured `takeout_watch_dir`
-   (manually, or automated via a separate sync from the cloud destination
-   in step 2 - that is deliberately not part of this integration).
+3. Get finished archives into the configured `takeout_watch_dir` - three
+   ways, combinable, all optional except the first:
+   - Manually (or via your own separate sync step from the cloud
+     destination in step 2 - rclone, Nextcloud, whatever you already run).
+   - Paste one or more **Takeout email download links** into the
+     `takeout_download_links` field (setup or later via Configure) - see
+     "Download links" below.
+   - Enable **Drive sync** during setup - see "Google Drive sync" below.
 4. Config flow: backend `takeout`, target directory, watch directory,
    interval, optionally "delete archive after import".
 5. The integration unpacks every new archive, files media
    chronologically into `YYYY/YYYY-MM/` based on the `<file>.json`
    sidecar (`photoTakenTime`), and skips already-imported files
    (SHA-256 hash comparison, consistent across backends).
+
+#### Download links
+
+If you request a Takeout export with delivery method **"Send download
+link via email"**, paste the link(s) from that email (one per line) into
+`takeout_download_links` - the integration fetches them directly into
+`takeout_watch_dir` on the next sync, no manual download needed.
+
+These are meant to be pre-authorized, time-limited URLs (valid ~7 days,
+max. 5 downloads each), fetched with a plain HTTPS request - no Google
+sign-in performed by this integration. **If Google actually requires an
+authenticated browser session for a given link** (this integration
+deliberately does not attempt to script a Google login - see "Known
+limitations"), the download fails with a clear error on the sensor
+instead of silently saving the resulting HTML login page as if it were an
+archive; fall back to downloading it yourself and dropping it into
+`takeout_watch_dir` in that case. A successfully downloaded link is
+remembered (won't be re-fetched); failed ones are retried on the next
+sync automatically since links commonly used up mid-way just need one
+more attempt.
+
+#### Google Drive sync
+
+Continuous alternative to manually placing archives: enable **"Enable
+Google Drive sync"** when choosing the `takeout` backend. This adds a
+Google sign-in step (separate from `library_api`'s, but can reuse the
+same Application Credentials/Google Cloud project - see step 0 below) and
+then polls Google Drive on every sync for files named `takeout-*`
+(Takeout's own naming, e.g. `takeout-20250801T000000Z-001.zip`),
+optionally restricted to one Drive folder ID, and downloads new ones
+straight into `takeout_watch_dir`.
+
+0. In the same Google Cloud project as step 1 above, enable the **Google
+   Drive API**, and add the `drive.readonly` scope to the OAuth consent
+   screen's scope list (Data access) - same place you added the Photos
+   scopes for `library_api`, if you've set that up. If you're using
+   `takeout` standalone, you still need a Google Cloud project + OAuth
+   client (Application Credentials) for this, exactly like `library_api`
+   step 1-4, just with `drive.readonly` instead of the Photos scopes.
+1. Config flow: backend `takeout` → "Enable Google Drive sync" → sign in
+   with your Google account → target directory, watch directory,
+   interval, delete-after-import, download links, and (optional) a Drive
+   folder ID to restrict the search to (empty = all of My Drive).
+2. Set up "Scheduled exports" (see step 2 above) with **Drive** as the
+   destination - this backend then picks up every new export
+   automatically, no external sync tool needed at all.
+
+Drive sync is a setup-time choice - to add it to an existing plain
+`takeout` instance, remove and re-add the integration with the toggle
+checked (same limitation as changing backend type).
 
 #### Large libraries: first full export without Drive storage
 
@@ -171,20 +226,23 @@ quota isn't enough:
    storage quota, since the archives are only made available for direct
    download for a limited time (~7 days, max. 5 downloads per archive).
    Choose a 50GB archive size to keep the number of files small.
-2. Download all archives within the 7 days and place them into
-   `takeout_watch_dir`.
-3. **Only then** switch to "Scheduled exports" (Drive) - according to
-   Google, that then only transfers *new/changed* data since the last
-   export, so for most libraries just a few GB per run instead of the
-   full size.
+2. Paste the resulting email link(s) into `takeout_download_links` (see
+   "Download links" above) - or download them yourself within the 7 days
+   and place them into `takeout_watch_dir` if a link needs a browser
+   session this integration can't provide.
+3. **Only then** switch to "Scheduled exports" (Drive), optionally with
+   Drive sync enabled (see above) - according to Google, that then only
+   transfers *new/changed* data since the last export, so for most
+   libraries just a few GB per run instead of the full size.
 
 Google Takeout doesn't allow selecting by album or time range for
 Photos - a one-time export is always the complete library.
 
 **Limitation:** no real-time sync - depends on how often exports are
-generated and delivered into the watch directory. No automatic rewriting
-of EXIF tags (only filesystem mtime/folder structure are derived from the
-JSON).
+generated (Drive sync/download links still just react to what already
+exists; they don't make Google generate exports faster). No automatic
+rewriting of EXIF tags (only filesystem mtime/folder structure are
+derived from the JSON).
 
 ## Services
 
@@ -204,6 +262,13 @@ JSON).
 - Takeout doesn't rewrite EXIF back into the image file (only
   folder/mtime); usually irrelevant for camera originals, since the
   camera already sets EXIF correctly.
-- No automated Takeout triggering via browser automation - deliberately
-  not implemented (fragile, potentially violates Google's terms of
-  service for automated access to the web UI).
+- No automated *triggering* of a Takeout export via browser automation -
+  deliberately not implemented (fragile, potentially violates Google's
+  terms of service for automated access to the web UI). Download links
+  and Drive sync only *fetch* exports that already exist (created by you
+  manually, or by Takeout's own "Scheduled exports" feature) - neither
+  scripts a Google login or the Takeout web UI itself.
+- Download links only work if Google serves the archive to a plain,
+  unauthenticated HTTPS request; if a given link actually requires a
+  logged-in browser session, the fetch fails with a clear error rather
+  than silently misbehaving - see "Download links" above.

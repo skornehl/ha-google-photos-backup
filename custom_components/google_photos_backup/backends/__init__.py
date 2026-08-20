@@ -5,7 +5,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
 
-from ..const import BACKEND_LIBRARY_API, BACKEND_RCLONE, BACKEND_TAKEOUT, CONF_BACKEND
+from ..const import (
+    BACKEND_LIBRARY_API,
+    BACKEND_RCLONE,
+    BACKEND_TAKEOUT,
+    CONF_BACKEND,
+    CONF_TAKEOUT_DRIVE_SYNC,
+)
 from .base import BackupBackend, BackupStats, SyncStateStore
 from .library_api import LibraryApiBackend
 from .rclone_backend import RcloneBackend
@@ -30,6 +36,12 @@ async def async_create_backend(
         return RcloneBackend(hass, entry, state)
 
     if backend_type == BACKEND_TAKEOUT:
-        return TakeoutBackend(hass, entry, state)
+        oauth_session = None
+        if entry.data.get(CONF_TAKEOUT_DRIVE_SYNC):
+            implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(
+                hass, entry
+            )
+            oauth_session = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
+        return TakeoutBackend(hass, entry, state, oauth_session=oauth_session)
 
     raise ValueError(f"Unbekanntes Backend: {backend_type}")

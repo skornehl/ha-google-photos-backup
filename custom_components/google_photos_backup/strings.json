@@ -33,14 +33,36 @@
           "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)"
         }
       },
+      "takeout_drive_choice": {
+        "title": "Google Drive sync?",
+        "description": "Optionally poll a Google Drive location directly for new Takeout export archives (as delivered by Takeout's own 'Scheduled exports' feature) and download them in automatically, instead of relying on a separate external sync step into the watch directory. Needs its own Google sign-in with the Drive API (read-only) enabled on the same Google Cloud project used for library_api - see README.",
+        "data": {
+          "takeout_drive_sync": "Enable Google Drive sync"
+        }
+      },
       "takeout": {
         "title": "Configure Takeout backend",
         "description": "Drop Google Takeout export archives (.zip/.tgz) into the watch directory - the integration extracts them, files media by capture date from the JSON sidecar, and deduplicates via file hashes.",
         "data": {
           "target_dir": "Target directory (local mount)",
           "sync_interval_minutes": "Sync interval (minutes)",
+          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
           "takeout_watch_dir": "Watch directory for Takeout archives",
-          "takeout_delete_after_import": "Delete archive after successful import"
+          "takeout_delete_after_import": "Delete archive after successful import",
+          "takeout_download_links": "Takeout email download links (one per line, optional)"
+        }
+      },
+      "takeout_drive_options": {
+        "title": "Configure Takeout backend (with Drive sync)",
+        "description": "Same as the plain Takeout backend, plus an optional Drive folder ID to search in - leave empty to search all of My Drive for 'takeout-*' archives.",
+        "data": {
+          "target_dir": "Target directory (local mount)",
+          "sync_interval_minutes": "Sync interval (minutes)",
+          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
+          "takeout_watch_dir": "Watch directory for Takeout archives",
+          "takeout_delete_after_import": "Delete archive after successful import",
+          "takeout_download_links": "Takeout email download links (one per line, optional)",
+          "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)"
         }
       }
     },
@@ -62,7 +84,9 @@
         "title": "Google Photos Backup options",
         "data": {
           "sync_interval_minutes": "Sync interval (minutes)",
-          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)"
+          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
+          "takeout_download_links": "Takeout email download links (one per line, optional)",
+          "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)"
         }
       }
     }

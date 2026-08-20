@@ -20,13 +20,13 @@ DEFAULT_SYNC_INTERVAL_MINUTES: Final = 60
 MIN_SYNC_INTERVAL_MINUTES: Final = 5
 
 # --- Bandwidth throttling ------------------------------------------------------
-# Only meaningful for backends that transfer bytes themselves (library_api,
-# rclone). The takeout backend never talks to the network - it only reads
-# archives already sitting in takeout_watch_dir - so it doesn't offer this
-# option; see takeout_backend.py.
+# Applies to every backend that can transfer bytes itself: library_api and
+# takeout always can (takeout via download links / Drive sync, see below);
+# rclone passes it straight through as its own --bwlimit flag.
 CONF_BANDWIDTH_LIMIT_KBPS: Final = "bandwidth_limit_kbps"
 DEFAULT_BANDWIDTH_LIMIT_KBPS: Final = 0  # 0 = unlimited
-DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB, used by the throttled library_api downloader
+DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB, used by throttled in-memory reads
+DRIVE_DOWNLOAD_FLUSH_SIZE: Final = 8 * 1024 * 1024  # buffered writes for large archives
 
 # --- library_api backend ------------------------------------------------------
 # Removed 2025-03-31 by Google: photoslibrary, photoslibrary.readonly,
@@ -73,6 +73,30 @@ CONF_TAKEOUT_WATCH_DIR: Final = "takeout_watch_dir"
 CONF_TAKEOUT_DELETE_AFTER_IMPORT: Final = "takeout_delete_after_import"
 DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT: Final = False
 TAKEOUT_ARCHIVE_SUFFIXES: Final = (".zip", ".tgz", ".tar.gz")
+
+# Optional: one-time archives from Takeout's "send download link via email"
+# delivery (see README "Large libraries" section) - newline-separated URLs,
+# downloaded straight into takeout_watch_dir. Plain HTTPS, no OAuth: these
+# are meant to be pre-authorized, time-limited URLs, not something that
+# needs a logged-in browser session. If Google *does* require one for a
+# given link, the download fails with a clear error instead of silently
+# saving an HTML login page as if it were an archive.
+CONF_TAKEOUT_DOWNLOAD_LINKS: Final = "takeout_download_links"
+
+# Optional: continuous alternative to manually placing archives in
+# takeout_watch_dir - polls a Google Drive location (My Drive root, or one
+# folder) for new "takeout-*" archives (as delivered by Takeout's own
+# "Scheduled exports" feature) and downloads them in automatically. Needs
+# its own OAuth consent (Drive API enabled + drive.readonly scope added to
+# the same Google Cloud project/consent screen used for library_api) -
+# requested only when this is enabled, see config_flow.py.
+CONF_TAKEOUT_DRIVE_SYNC: Final = "takeout_drive_sync"
+DEFAULT_TAKEOUT_DRIVE_SYNC: Final = False
+CONF_TAKEOUT_DRIVE_FOLDER_ID: Final = "takeout_drive_folder_id"
+DEFAULT_TAKEOUT_DRIVE_FOLDER_ID: Final = ""  # empty = search all of My Drive
+OAUTH2_SCOPE_DRIVE_READONLY: Final = "https://www.googleapis.com/auth/drive.readonly"
+OAUTH2_SCOPES_DRIVE: Final = [OAUTH2_SCOPE_DRIVE_READONLY]
+DRIVE_API_BASE: Final = "https://www.googleapis.com/drive/v3"
 
 # --- persisted sync state (Store) ------------------------------------------
 STORAGE_VERSION: Final = 1

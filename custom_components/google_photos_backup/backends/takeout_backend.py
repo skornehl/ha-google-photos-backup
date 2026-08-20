@@ -1,14 +1,23 @@
 """takeout backend: import Google Takeout export archives.
 
 This is the only backend that can see a user's *entire* existing library
-(see README.md) - because it never talks to a restricted API at all. The
-trade-off is that it's not push-based: the user (or Google Takeout's own
-"scheduled exports" feature, which can auto-generate a new Google Photos
-export every 2 months for a year and drop it into linked Drive / Dropbox /
-OneDrive / Box storage) has to get archive files into `takeout_watch_dir`.
-Getting them from that cloud destination into the local watch dir is a
-separate sync step outside this integration's scope (e.g. another rclone
-remote, Nextcloud, or a manual copy).
+(see README.md) - because it never talks to a restricted photos API at
+all. The trade-off is that it's not push-based by default: archive files
+need to land in `takeout_watch_dir` somehow. Three ways to get them there,
+all optional and combinable:
+
+  1. Manual: place archives into takeout_watch_dir yourself (e.g. copied
+     from Google Takeout's own "scheduled exports" feature, which can
+     auto-generate a new export every 2 months for a year into linked
+     Drive/Dropbox/OneDrive/Box storage) via a separate sync step outside
+     this integration's scope (rclone, Nextcloud, manual copy, ...).
+  2. `_download_links`: paste one-time "download link" URLs from a
+     Takeout export email (delivery method "Send download link via
+     email") - see README "Large libraries" section for why that delivery
+     method matters (it doesn't count against Drive storage quota).
+  3. `_sync_drive_folder`: optional continuous alternative to (1) - polls
+     Google Drive directly via the Drive API (OAuth, drive.readonly) for
+     new "takeout-*" archives and downloads them in automatically.
 
 Known Takeout quirks handled here:
   - Metadata lives in a sidecar `<file>.json` next to each media file, not
@@ -33,21 +42,32 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import tarfile
 import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
+
+from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from ..const import (
+    CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
+    CONF_TAKEOUT_DOWNLOAD_LINKS,
+    CONF_TAKEOUT_DRIVE_FOLDER_ID,
     CONF_TAKEOUT_WATCH_DIR,
     CONF_TARGET_DIR,
+    DEFAULT_BANDWIDTH_LIMIT_KBPS,
+    DRIVE_API_BASE,
     TAKEOUT_ARCHIVE_SUFFIXES,
 )
 from .base import BackupBackend, BackupStats
 from .fsutil import dest_dir_for_date, ensure_target_dir, sha256_file, unique_destination
+from .throttle import throttled_stream_to_file
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +83,19 @@ SIDECAR_PATTERNS = (
 
 
 class TakeoutBackend(BackupBackend):
+    def __init__(
+        self,
+        hass,
+        entry,
+        state,
+        oauth_session: config_entry_oauth2_flow.OAuth2Session | None = None,
+    ) -> None:
+        """`oauth_session` is only set when Drive sync is enabled - see
+        backends/__init__.py::async_create_backend. Download links never
+        use it; they're plain, unauthenticated HTTPS fetches."""
+        super().__init__(hass, entry, state)
+        self._oauth = oauth_session
+
     async def async_validate(self) -> None:
         target_dir = self.entry.data[CONF_TARGET_DIR]
         watch_dir = self.entry.data[CONF_TAKEOUT_WATCH_DIR]
@@ -70,12 +103,21 @@ class TakeoutBackend(BackupBackend):
         watch_path = Path(watch_dir)
         if not await self.hass.async_add_executor_job(watch_path.is_dir):
             raise ValueError(f"Watch-Verzeichnis existiert nicht: {watch_dir}")
+        if self._oauth is not None:
+            await self._oauth.async_ensure_token_valid()
 
     async def async_run_backup(self) -> BackupStats:
         stats = BackupStats()
         watch_dir = Path(self.entry.data[CONF_TAKEOUT_WATCH_DIR])
         target_dir = self.entry.data[CONF_TARGET_DIR]
         delete_after = self.entry.data.get(CONF_TAKEOUT_DELETE_AFTER_IMPORT, False)
+
+        # Both of these only ever add files to watch_dir - the archive
+        # scan/import below then treats them exactly like anything the
+        # user dropped in manually, so there's exactly one import code
+        # path regardless of how an archive got here.
+        await self._download_links(watch_dir, stats)
+        await self._sync_drive_folder(watch_dir, stats)
 
         archives = await self.hass.async_add_executor_job(self._list_new_archives, watch_dir)
         for archive in archives:
@@ -107,6 +149,140 @@ class TakeoutBackend(BackupBackend):
             and any(p.name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES)
         ]
         return found
+
+    # -- download links (plain HTTPS, no OAuth) ------------------------------
+
+    async def _download_links(self, watch_dir: Path, stats: BackupStats) -> None:
+        raw = self._option(CONF_TAKEOUT_DOWNLOAD_LINKS, "") or ""
+        urls = [line.strip() for line in raw.splitlines() if line.strip()]
+        if not urls:
+            return
+
+        downloaded: list[str] = self.state.get("downloaded_takeout_links", [])
+        limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
+        session = async_get_clientsession(self.hass)
+
+        for url in urls:
+            if url in downloaded:
+                continue
+            _LOGGER.info("Lade Takeout-Archiv von manuellem Link herunter: %s", url)
+            dest: Path | None = None
+            try:
+                async with session.get(url, allow_redirects=True) as resp:
+                    resp.raise_for_status()
+                    if "html" in resp.headers.get("Content-Type", "").lower():
+                        # Most likely a Google sign-in/error page rather than
+                        # the archive - this link needs an authenticated
+                        # browser session we don't have here. Fail loudly
+                        # instead of silently saving the HTML as a "zip".
+                        raise ValueError(
+                            "Antwort ist eine HTML-Seite statt eines Archivs - "
+                            "dieser Link verlangt vermutlich eine angemeldete "
+                            "Google-Browser-Session. Archiv stattdessen manuell "
+                            "herunterladen und in takeout_watch_dir legen."
+                        )
+                    dest = watch_dir / self._filename_for_link(resp, url, watch_dir)
+                    await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
+            except Exception as err:  # noqa: BLE001 - surfaced via sensor
+                stats.errors.append(f"Download-Link fehlgeschlagen ({url[:80]}): {err}")
+                if dest is not None:
+                    dest.unlink(missing_ok=True)
+                continue
+
+            downloaded.append(url)
+            self.state.set("downloaded_takeout_links", downloaded)
+
+    @staticmethod
+    def _filename_for_link(resp, url: str, watch_dir: Path) -> str:
+        disposition = resp.headers.get("Content-Disposition", "")
+        match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition)
+        if match:
+            name = Path(match.group(1)).name
+        else:
+            name = Path(urlsplit(url).path).name
+        if not name or not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
+            name = f"takeout_link_{abs(hash(url)) % 10_000_000}.zip"
+        # Two different email links could coincidentally suggest the same
+        # filename (Google reuses "takeout-...-001.zip" numbering per
+        # export) - never overwrite an existing file.
+        candidate = watch_dir / name
+        if not candidate.exists():
+            return name
+        stem, suffix = os.path.splitext(name)
+        n = 1
+        while (watch_dir / f"{stem}_{n}{suffix}").exists():
+            n += 1
+        return f"{stem}_{n}{suffix}"
+
+    # -- Google Drive folder sync (OAuth, drive.readonly) ---------------------
+
+    async def _sync_drive_folder(self, watch_dir: Path, stats: BackupStats) -> None:
+        if self._oauth is None:
+            return
+        await self._oauth.async_ensure_token_valid()
+
+        folder_id = self._option(CONF_TAKEOUT_DRIVE_FOLDER_ID, "") or None
+        limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
+        downloaded_ids: list[str] = self.state.get("downloaded_drive_file_ids", [])
+
+        query = "name contains 'takeout-' and trashed = false"
+        if folder_id:
+            query += f" and '{folder_id}' in parents"
+
+        files: list[dict] = []
+        page_token: str | None = None
+        while True:
+            params = {
+                "q": query,
+                "fields": "nextPageToken, files(id, name)",
+                "pageSize": 100,
+                "spaces": "drive",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            try:
+                resp = await self._oauth.async_request("GET", f"{DRIVE_API_BASE}/files", params=params)
+                resp.raise_for_status()
+                payload = await resp.json()
+            except Exception as err:  # noqa: BLE001
+                stats.errors.append(f"Drive-Abfrage fehlgeschlagen: {err}")
+                return
+            files.extend(payload.get("files", []))
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                break
+
+        for entry in files:
+            file_id = entry.get("id")
+            name = entry.get("name", "")
+            if not file_id or file_id in downloaded_ids:
+                continue
+            if not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
+                continue
+
+            dest = watch_dir / name
+            if dest.exists():
+                # Already on disk from a previous run that crashed/restarted
+                # before recording state - trust the existing file over
+                # re-downloading a potentially huge archive.
+                downloaded_ids.append(file_id)
+                self.state.set("downloaded_drive_file_ids", downloaded_ids)
+                continue
+
+            _LOGGER.info("Lade Takeout-Archiv aus Google Drive: %s", name)
+            try:
+                resp = await self._oauth.async_request(
+                    "GET", f"{DRIVE_API_BASE}/files/{file_id}", params={"alt": "media"}
+                )
+                resp.raise_for_status()
+                await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
+            except Exception as err:  # noqa: BLE001
+                stats.errors.append(f"Drive-Download {name} fehlgeschlagen: {err}")
+                dest.unlink(missing_ok=True)
+                continue
+
+            downloaded_ids.append(file_id)
+            self.state.set("downloaded_drive_file_ids", downloaded_ids)
 
     # -- archive import (blocking, runs in executor) -------------------------
 
