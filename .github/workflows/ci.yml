@@ -83,14 +83,14 @@ jobs:
       - run: pip install ruff
       - run: ruff check custom_components tests
 
-  # Informational only for now (continue-on-error): the codebase isn't
-  # fully --strict clean yet, but running it surfaces regressions in the
-  # parts that are, and makes the remaining gap visible instead of
-  # invisible. Flip to blocking once the run is clean.
+  # Blocking as of #52: the run is clean, and mypy has already caught
+  # real defects here that pytest/ruff/hassfest did not - a set-shadowing
+  # bug in backends/base.py and an unguarded None dereference in the
+  # reauth flow. Not --strict yet; see [tool.mypy] in pyproject.toml for
+  # which checks are on.
   typecheck:
-    name: Type check (mypy, non-blocking)
+    name: Type check (mypy)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
