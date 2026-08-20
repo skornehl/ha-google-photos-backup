@@ -80,6 +80,7 @@
     "abort": {
       "already_configured": "This instance is already configured",
       "reauth_successful": "Re-authentication successful",
+      "reauth_entry_missing": "The instance was removed while re-authenticating - nothing to update.",
       "oauth_error": "Error receiving OAuth2 token data",
       "oauth_timeout": "Timed out waiting for authorization",
       "missing_configuration": "The integration is not configured correctly (Application Credentials missing). See README."
@@ -111,10 +112,18 @@
   },
   "entity": {
     "sensor": {
-      "last_sync": { "name": "Last sync" },
-      "files_backed_up": { "name": "Files backed up" },
-      "last_error": { "name": "Last error" },
-      "free_space": { "name": "Free space" }
+      "last_sync": {
+        "name": "Last sync"
+      },
+      "files_backed_up": {
+        "name": "Files backed up"
+      },
+      "last_error": {
+        "name": "Last error"
+      },
+      "free_space": {
+        "name": "Free space"
+      }
     }
   },
   "services": {
