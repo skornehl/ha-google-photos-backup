@@ -142,6 +142,29 @@ diesen rclone-Remote hochgeladen wurden - siehe rclone-Doku
    `JJJJ/JJJJ-MM/` ein und überspringt bereits importierte Dateien
    (SHA-256-Hash-Vergleich, backend-übergreifend konsistent).
 
+#### Große Bibliotheken: erster Voll-Export ohne Drive-Speicher
+
+"Geplante Exporte" liefern *immer* nach Drive/Dropbox/OneDrive/Box - dafür
+muss dort genug freier Speicher für die **komplette** Bibliothek vorhanden
+sein (bei z. B. 1TB Fotos also ~1TB frei), da der erste Lauf alles
+exportiert. Reicht das Kontingent nicht:
+
+1. Für den **ersten** Export stattdessen einen **einmaligen** Takeout-Export
+   mit Übermittlungsmethode **"Download-Link per E-Mail"** wählen (nicht
+   "Zu Drive hinzufügen") - das zählt laut Google **nicht** gegen das
+   Speicherkontingent, da die Archive nur befristet (~7 Tage, max. 5
+   Downloads je Archiv) zum direkten Download bereitgestellt werden.
+   50GB-Archivgröße wählen, um die Anzahl der Dateien klein zu halten.
+2. Alle Archive innerhalb der 7 Tage herunterladen und ins
+   `takeout_watch_dir` legen.
+3. Erst **danach** auf "Geplante Exporte" (Drive) umstellen - die
+   überträgt laut Google dann nur noch *neue/geänderte* Daten seit dem
+   letzten Export, also für die meisten Bibliotheken nur noch wenige GB
+   pro Lauf statt der vollen Größe.
+
+Google Takeout erlaubt bei Fotos keine Auswahl nach Album oder Zeitraum -
+ein einmaliger Export ist immer die komplette Bibliothek.
+
 **Einschränkung:** kein Echtzeit-Sync - abhängig davon, wie oft Exporte
 erzeugt und ins Watch-Verzeichnis geliefert werden. Kein automatisches
 Neuschreiben von EXIF-Tags (nur Dateisystem-mtime/Ordnerstruktur werden aus
