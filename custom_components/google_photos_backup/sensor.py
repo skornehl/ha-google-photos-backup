@@ -11,7 +11,14 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_BACKEND, DOMAIN
+from .const import (
+    ATTR_FILES_BACKED_UP,
+    ATTR_FREE_SPACE,
+    ATTR_LAST_ERROR,
+    ATTR_LAST_SYNC,
+    CONF_BACKEND,
+    DOMAIN,
+)
 from .coordinator import GooglePhotosBackupCoordinator
 
 
@@ -52,7 +59,7 @@ class LastSyncSensor(_BaseSensor):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "last_sync")
+        super().__init__(coordinator, entry, ATTR_LAST_SYNC)
 
     @property
     def native_value(self) -> datetime | None:
@@ -65,7 +72,7 @@ class FilesBackedUpSensor(_BaseSensor):
     _attr_icon = "mdi:image-multiple"
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "files_backed_up")
+        super().__init__(coordinator, entry, ATTR_FILES_BACKED_UP)
 
     @property
     def native_value(self) -> int | None:
@@ -85,7 +92,7 @@ class LastErrorSensor(_BaseSensor):
     _attr_icon = "mdi:alert-circle-outline"
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "last_error")
+        super().__init__(coordinator, entry, ATTR_LAST_ERROR)
 
     @property
     def native_value(self) -> str:
@@ -108,7 +115,7 @@ class FreeSpaceSensor(_BaseSensor):
     _attr_icon = "mdi:harddisk"
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "free_space")
+        super().__init__(coordinator, entry, ATTR_FREE_SPACE)
 
     @property
     def native_value(self) -> float | None:
