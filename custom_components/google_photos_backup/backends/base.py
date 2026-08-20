@@ -99,3 +99,9 @@ class BackupBackend(ABC):
     @abstractmethod
     async def async_run_backup(self) -> BackupStats:
         """Perform one backup pass and return stats for the sensors."""
+
+    async def async_terminate(self) -> None:
+        """Stop whatever this backend might currently have in flight
+        (e.g. a subprocess) - called on unload/reload so nothing is left
+        running detached from HA. No-op by default; only RcloneBackend
+        currently has something to actually terminate."""

@@ -67,6 +67,12 @@ CONF_RCLONE_CONFIG_PATH: Final = "rclone_config_path"
 CONF_RCLONE_REMOTE_NAME: Final = "rclone_remote_name"
 CONF_RCLONE_SOURCE_PATH: Final = "rclone_source_path"
 DEFAULT_RCLONE_SOURCE_PATH: Final = "media/by-month"
+# Deliberately generous rather than short: with a low bandwidth_limit_kbps
+# (see throttle.py) a single large, legitimate sync can take many hours -
+# this is only meant to catch a genuinely hung rclone process (stuck auth
+# prompt, dead connection that never errors out), not to cap normal
+# large/slow transfers.
+RCLONE_TIMEOUT_SECONDS: Final = 24 * 60 * 60
 
 # --- takeout backend -------------------------------------------------------
 CONF_TAKEOUT_WATCH_DIR: Final = "takeout_watch_dir"
