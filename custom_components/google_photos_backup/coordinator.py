@@ -12,7 +12,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .backends import BackupBackend, BackupStats, SyncStateStore, async_create_backend
+from .backends import BackupBackend, SyncStateStore, async_create_backend
 from .backends.fsutil import free_bytes
 from .const import (
     CONF_SYNC_INTERVAL_MINUTES,
