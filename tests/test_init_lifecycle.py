@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from homeassistant.config_entries import ConfigEntryState
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -105,8 +104,15 @@ async def test_services_survive_until_the_last_entry_is_unloaded(hass, tmp_path)
         AsyncMock(side_effect=lambda *a, **k: _backend()),
     ):
         assert await hass.config_entries.async_setup(first.entry_id)
-        assert await hass.config_entries.async_setup(second.entry_id)
         await hass.async_block_till_done()
+        # Setting up the domain can already pull in the second entry, in
+        # which case setting it up again raises OperationNotAllowed - so
+        # only do it if it isn't loaded yet.
+        if second.state is not ConfigEntryState.LOADED:
+            assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+        assert first.state is ConfigEntryState.LOADED
+        assert second.state is ConfigEntryState.LOADED
 
         assert await hass.config_entries.async_unload(first.entry_id)
         await hass.async_block_till_done()
