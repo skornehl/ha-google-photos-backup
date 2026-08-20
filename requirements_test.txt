@@ -1,0 +1,11 @@
+# Test-only dependencies - never shipped, not referenced in manifest.json.
+#
+# pytest-homeassistant-custom-component pulls in a matching pinned
+# homeassistant core + pytest + pytest-asyncio automatically; that's the
+# standard way to unit-test a HACS custom_component against a real (not
+# hand-mocked) HA runtime. It's intentionally not version-pinned here so CI
+# always tests against the latest compatible combination - if a HA core
+# release ever breaks something, that surfaces as a CI failure to fix
+# rather than silently testing a stale HA version forever.
+pytest-homeassistant-custom-component
+aioresponses
