@@ -306,3 +306,16 @@ derived from the JSON).
   unauthenticated HTTPS request; if a given link actually requires a
   logged-in browser session, the fetch fails with a clear error rather
   than silently misbehaving - see "Download links" above.
+
+## Development
+
+```bash
+pip install -r requirements_test.txt
+pytest tests/ -v
+```
+
+CI (`.github/workflows/ci.yml`) runs on every pull request: Python syntax +
+JSON validity, `strings.json`/translations key-sync check,
+[hassfest](https://developers.home-assistant.io/docs/creating_integration_manifest/#hassfest)
+(the official HA integration validator), `ruff` lint, and the pytest suite
+against Python 3.12 and 3.13.
