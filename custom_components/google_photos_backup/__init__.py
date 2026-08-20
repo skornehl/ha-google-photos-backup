@@ -46,6 +46,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    coordinator: GooglePhotosBackupCoordinator | None = hass.data.get(DOMAIN, {}).get(
+        entry.entry_id
+    )
+    if coordinator is not None and coordinator.backend is not None:
+        # Stop anything the backend might have in flight (e.g. rclone's
+        # subprocess) before tearing down the entry, so unload/reload
+        # never leaves it running detached from HA - see issue #6.
+        await coordinator.backend.async_terminate()
+
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
