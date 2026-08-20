@@ -161,7 +161,7 @@ class TakeoutBackend(BackupBackend):
                     await self._cleanup_drive_file(drive_file_id, archive.name, stats)
 
             if delete_local_after:
-                archive.unlink(missing_ok=True)
+                await self.hass.async_add_executor_job(archive.unlink, True)
 
         return stats
 
@@ -207,19 +207,26 @@ class TakeoutBackend(BackupBackend):
                             "Google-Browser-Session. Archiv stattdessen manuell "
                             "herunterladen und in takeout_watch_dir legen."
                         )
-                    dest = watch_dir / self._filename_for_link(resp, url, watch_dir)
+                    proposed_name = self._proposed_filename_for_link(resp, url)
+                    name = await self.hass.async_add_executor_job(
+                        self._resolve_unique_filename, watch_dir, proposed_name
+                    )
+                    dest = watch_dir / name
                     await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
             except Exception as err:  # noqa: BLE001 - surfaced via sensor
                 stats.errors.append(f"Download-Link fehlgeschlagen ({url[:80]}): {err}")
                 if dest is not None:
-                    dest.unlink(missing_ok=True)
+                    await self.hass.async_add_executor_job(dest.unlink, True)
                 continue
 
             downloaded.append(url)
             self.state.set("downloaded_takeout_links", downloaded)
 
     @staticmethod
-    def _filename_for_link(resp, url: str, watch_dir: Path) -> str:
+    def _proposed_filename_for_link(resp, url: str) -> str:
+        """Pure string logic, no filesystem access - safe to call directly
+        from a coroutine. See _resolve_unique_filename() for the part that
+        actually needs to touch the filesystem."""
         disposition = resp.headers.get("Content-Disposition", "")
         match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition)
         if match:
@@ -228,9 +235,16 @@ class TakeoutBackend(BackupBackend):
             name = Path(urlsplit(url).path).name
         if not name or not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
             name = f"takeout_link_{abs(hash(url)) % 10_000_000}.zip"
-        # Two different email links could coincidentally suggest the same
-        # filename (Google reuses "takeout-...-001.zip" numbering per
-        # export) - never overwrite an existing file.
+        return name
+
+    @staticmethod
+    def _resolve_unique_filename(watch_dir: Path, name: str) -> str:
+        """Blocking (stat() calls) - always call via async_add_executor_job.
+
+        Two different email links could coincidentally suggest the same
+        filename (Google reuses "takeout-...-001.zip" numbering per
+        export) - never overwrite an existing file.
+        """
         candidate = watch_dir / name
         if not candidate.exists():
             return name
@@ -287,7 +301,7 @@ class TakeoutBackend(BackupBackend):
                 continue
 
             dest = watch_dir / name
-            if dest.exists():
+            if await self.hass.async_add_executor_job(dest.exists):
                 # Already on disk from a previous run that crashed/restarted
                 # before recording state - trust the existing file over
                 # re-downloading a potentially huge archive.
@@ -305,7 +319,7 @@ class TakeoutBackend(BackupBackend):
                 await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
             except Exception as err:  # noqa: BLE001
                 stats.errors.append(f"Drive-Download {name} fehlgeschlagen: {err}")
-                dest.unlink(missing_ok=True)
+                await self.hass.async_add_executor_job(dest.unlink, True)
                 continue
 
             downloaded_ids.append(file_id)
