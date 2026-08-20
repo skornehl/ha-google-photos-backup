@@ -31,6 +31,8 @@ from .const import (
     CONF_SYNC_INTERVAL_MINUTES,
     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
     CONF_TAKEOUT_DOWNLOAD_LINKS,
+    CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
+    CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     CONF_TAKEOUT_DRIVE_FOLDER_ID,
     CONF_TAKEOUT_DRIVE_SYNC,
     CONF_TAKEOUT_WATCH_DIR,
@@ -40,6 +42,8 @@ from .const import (
     DEFAULT_RCLONE_SOURCE_PATH,
     DEFAULT_SYNC_INTERVAL_MINUTES,
     DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT,
+    DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
+    DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     DEFAULT_TAKEOUT_DRIVE_FOLDER_ID,
     DEFAULT_TAKEOUT_DRIVE_SYNC,
     DOMAIN,
@@ -98,6 +102,18 @@ def _takeout_schema(*, drive_enabled: bool, defaults: dict[str, Any] | None = No
                     CONF_TAKEOUT_DRIVE_FOLDER_ID,
                     default=defaults.get(CONF_TAKEOUT_DRIVE_FOLDER_ID, DEFAULT_TAKEOUT_DRIVE_FOLDER_ID),
                 ): str,
+                vol.Optional(
+                    CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
+                    default=defaults.get(
+                        CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC, DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
+                    default=defaults.get(
+                        CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY, DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY
+                    ),
+                ): bool,
             }
         )
     return schema
@@ -295,5 +311,21 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
                         default=_current(CONF_TAKEOUT_DRIVE_FOLDER_ID, DEFAULT_TAKEOUT_DRIVE_FOLDER_ID),
                     )
                 ] = str
+                schema_dict[
+                    vol.Optional(
+                        CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
+                        default=_current(
+                            CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC, DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC
+                        ),
+                    )
+                ] = bool
+                schema_dict[
+                    vol.Optional(
+                        CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
+                        default=_current(
+                            CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY, DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY
+                        ),
+                    )
+                ] = bool
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))

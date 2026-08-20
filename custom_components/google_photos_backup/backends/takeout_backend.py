@@ -16,8 +16,13 @@ all optional and combinable:
      email") - see README "Large libraries" section for why that delivery
      method matters (it doesn't count against Drive storage quota).
   3. `_sync_drive_folder`: optional continuous alternative to (1) - polls
-     Google Drive directly via the Drive API (OAuth, drive.readonly) for
-     new "takeout-*" archives and downloads them in automatically.
+     Google Drive directly via the Drive API (OAuth, drive.readonly for
+     listing/downloading + drive.metadata for the optional cleanup below)
+     for new "takeout-*" archives and downloads them in automatically.
+     Optionally, once an archive downloaded this way has been *imported*
+     (not just downloaded), `_cleanup_drive_file` trashes or permanently
+     deletes it from Drive to free up quota for the next scheduled
+     export - see CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC.
 
 Known Takeout quirks handled here:
   - Metadata lives in a sidecar `<file>.json` next to each media file, not
@@ -58,10 +63,14 @@ from ..const import (
     CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
     CONF_TAKEOUT_DOWNLOAD_LINKS,
+    CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
+    CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     CONF_TAKEOUT_DRIVE_FOLDER_ID,
     CONF_TAKEOUT_WATCH_DIR,
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
+    DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
+    DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     DRIVE_API_BASE,
     TAKEOUT_ARCHIVE_SUFFIXES,
 )
@@ -110,7 +119,10 @@ class TakeoutBackend(BackupBackend):
         stats = BackupStats()
         watch_dir = Path(self.entry.data[CONF_TAKEOUT_WATCH_DIR])
         target_dir = self.entry.data[CONF_TARGET_DIR]
-        delete_after = self.entry.data.get(CONF_TAKEOUT_DELETE_AFTER_IMPORT, False)
+        delete_local_after = self.entry.data.get(CONF_TAKEOUT_DELETE_AFTER_IMPORT, False)
+        delete_drive_after = self._option(
+            CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC, DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC
+        )
 
         # Both of these only ever add files to watch_dir - the archive
         # scan/import below then treats them exactly like anything the
@@ -118,6 +130,11 @@ class TakeoutBackend(BackupBackend):
         # path regardless of how an archive got here.
         await self._download_links(watch_dir, stats)
         await self._sync_drive_folder(watch_dir, stats)
+
+        # name -> Drive file ID, persisted across runs so an archive that
+        # downloaded fine but failed to *import* last run still gets
+        # cleaned up from Drive once it does import successfully.
+        drive_ids_by_name: dict[str, str] = self.state.get("drive_file_id_by_name", {})
 
         archives = await self.hass.async_add_executor_job(self._list_new_archives, watch_dir)
         for archive in archives:
@@ -134,7 +151,16 @@ class TakeoutBackend(BackupBackend):
             processed_archives.append(archive.name)
             self.state.set("processed_archives", processed_archives)
 
-            if delete_after:
+            # Only clean up from Drive *after* a successful import, never
+            # right after download - an archive that downloaded fine but
+            # failed to extract/import must stay in Drive so it isn't lost.
+            drive_file_id = drive_ids_by_name.pop(archive.name, None)
+            if drive_file_id is not None:
+                self.state.set("drive_file_id_by_name", drive_ids_by_name)
+                if delete_drive_after:
+                    await self._cleanup_drive_file(drive_file_id, archive.name, stats)
+
+            if delete_local_after:
                 archive.unlink(missing_ok=True)
 
         return stats
@@ -214,7 +240,7 @@ class TakeoutBackend(BackupBackend):
             n += 1
         return f"{stem}_{n}{suffix}"
 
-    # -- Google Drive folder sync (OAuth, drive.readonly) ---------------------
+    # -- Google Drive folder sync (OAuth, drive.readonly + drive.metadata) ---
 
     async def _sync_drive_folder(self, watch_dir: Path, stats: BackupStats) -> None:
         if self._oauth is None:
@@ -267,6 +293,7 @@ class TakeoutBackend(BackupBackend):
                 # re-downloading a potentially huge archive.
                 downloaded_ids.append(file_id)
                 self.state.set("downloaded_drive_file_ids", downloaded_ids)
+                self._remember_drive_file(name, file_id)
                 continue
 
             _LOGGER.info("Lade Takeout-Archiv aus Google Drive: %s", name)
@@ -283,6 +310,40 @@ class TakeoutBackend(BackupBackend):
 
             downloaded_ids.append(file_id)
             self.state.set("downloaded_drive_file_ids", downloaded_ids)
+            self._remember_drive_file(name, file_id)
+
+    def _remember_drive_file(self, name: str, file_id: str) -> None:
+        """Record which Drive file a watch_dir archive came from, so
+        _cleanup_drive_file can find it again once the archive has been
+        successfully imported (see async_run_backup)."""
+        name_map: dict[str, str] = self.state.get("drive_file_id_by_name", {})
+        name_map[name] = file_id
+        self.state.set("drive_file_id_by_name", name_map)
+
+    async def _cleanup_drive_file(self, file_id: str, name: str, stats: BackupStats) -> None:
+        """Trash (default) or permanently delete an archive from Drive
+        after it has been successfully imported. Only called when
+        CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC is on - see async_run_backup.
+        """
+        permanently = self._option(
+            CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY, DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY
+        )
+        try:
+            if permanently:
+                resp = await self._oauth.async_request("DELETE", f"{DRIVE_API_BASE}/files/{file_id}")
+            else:
+                resp = await self._oauth.async_request(
+                    "PATCH", f"{DRIVE_API_BASE}/files/{file_id}", json={"trashed": True}
+                )
+            if resp.status != 404:  # 404 = already gone, nothing to do
+                resp.raise_for_status()
+            _LOGGER.info(
+                "Takeout-Archiv in Google Drive %s: %s",
+                "gelöscht" if permanently else "in den Papierkorb verschoben",
+                name,
+            )
+        except Exception as err:  # noqa: BLE001 - surfaced via sensor, file just stays in Drive
+            stats.errors.append(f"Aufräumen von {name} in Drive fehlgeschlagen: {err}")
 
     # -- archive import (blocking, runs in executor) -------------------------
 

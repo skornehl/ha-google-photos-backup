@@ -35,7 +35,7 @@
       },
       "takeout_drive_choice": {
         "title": "Google-Drive-Synchronisierung?",
-        "description": "Optional: einen Google-Drive-Ort direkt nach neuen Takeout-Exportarchiven abfragen (wie sie Takeouts eigene 'Geplante Exporte' liefern) und automatisch herunterladen, statt auf einen separaten externen Sync-Schritt ins Watch-Verzeichnis angewiesen zu sein. Braucht eine eigene Google-Anmeldung mit aktivierter Drive API (nur lesend) im selben Google-Cloud-Projekt wie library_api - siehe README.",
+        "description": "Optional: einen Google-Drive-Ort direkt nach neuen Takeout-Exportarchiven abfragen (wie sie Takeouts eigene 'Geplante Exporte' liefern), automatisch herunterladen und optional nach dem Import wieder aus Drive löschen - statt auf einen separaten externen Sync-Schritt ins Watch-Verzeichnis angewiesen zu sein. Braucht eine eigene Google-Anmeldung mit Lesezugriff auf dein gesamtes Drive plus Berechtigung, Datei-Metadaten zu verwalten (Papierkorb/Löschen) - das Löschen selbst ist standardmäßig aus, siehe nächster Schritt. Erfordert die aktivierte Drive API im selben Google-Cloud-Projekt wie library_api - siehe README.",
         "data": {
           "takeout_drive_sync": "Google-Drive-Synchronisierung aktivieren"
         }
@@ -54,7 +54,7 @@
       },
       "takeout_drive_options": {
         "title": "Takeout-Backend konfigurieren (mit Drive-Sync)",
-        "description": "Wie das normale Takeout-Backend, plus eine optionale Drive-Ordner-ID, in der gesucht wird - leer lassen, um in der gesamten 'Meine Ablage' nach 'takeout-*'-Archiven zu suchen.",
+        "description": "Wie das normale Takeout-Backend, plus eine optionale Drive-Ordner-ID, in der gesucht wird (leer lassen, um in der gesamten 'Meine Ablage' nach 'takeout-*'-Archiven zu suchen), und ob Archive nach dem Import in Drive aufgeräumt werden sollen.",
         "data": {
           "target_dir": "Zielverzeichnis (lokal gemountet)",
           "sync_interval_minutes": "Sync-Intervall (Minuten)",
@@ -62,7 +62,9 @@
           "takeout_watch_dir": "Watch-Verzeichnis für Takeout-Archive",
           "takeout_delete_after_import": "Archiv nach erfolgreichem Import löschen",
           "takeout_download_links": "Takeout-E-Mail-Download-Links (einer pro Zeile, optional)",
-          "takeout_drive_folder_id": "Drive-Ordner-ID für die Suche (leer = gesamte 'Meine Ablage')"
+          "takeout_drive_folder_id": "Drive-Ordner-ID für die Suche (leer = gesamte 'Meine Ablage')",
+          "takeout_drive_delete_after_sync": "Archiv nach erfolgreichem Import aus Drive löschen",
+          "takeout_drive_delete_permanently": "Endgültig löschen statt in den Papierkorb verschieben (gibt Quota sofort frei, NICHT wiederherstellbar)"
         }
       }
     },
@@ -86,7 +88,9 @@
           "sync_interval_minutes": "Sync-Intervall (Minuten)",
           "bandwidth_limit_kbps": "Bandbreitenlimit (KiB/s, 0 = unbegrenzt)",
           "takeout_download_links": "Takeout-E-Mail-Download-Links (einer pro Zeile, optional)",
-          "takeout_drive_folder_id": "Drive-Ordner-ID für die Suche (leer = gesamte 'Meine Ablage')"
+          "takeout_drive_folder_id": "Drive-Ordner-ID für die Suche (leer = gesamte 'Meine Ablage')",
+          "takeout_drive_delete_after_sync": "Archiv nach erfolgreichem Import aus Drive löschen",
+          "takeout_drive_delete_permanently": "Endgültig löschen statt in den Papierkorb verschieben (gibt Quota sofort frei, NICHT wiederherstellbar)"
         }
       }
     }

@@ -87,16 +87,34 @@ CONF_TAKEOUT_DOWNLOAD_LINKS: Final = "takeout_download_links"
 # takeout_watch_dir - polls a Google Drive location (My Drive root, or one
 # folder) for new "takeout-*" archives (as delivered by Takeout's own
 # "Scheduled exports" feature) and downloads them in automatically. Needs
-# its own OAuth consent (Drive API enabled + drive.readonly scope added to
-# the same Google Cloud project/consent screen used for library_api) -
+# its own OAuth consent (Drive API enabled + the scopes below added to the
+# same Google Cloud project/consent screen used for library_api) -
 # requested only when this is enabled, see config_flow.py.
 CONF_TAKEOUT_DRIVE_SYNC: Final = "takeout_drive_sync"
 DEFAULT_TAKEOUT_DRIVE_SYNC: Final = False
 CONF_TAKEOUT_DRIVE_FOLDER_ID: Final = "takeout_drive_folder_id"
 DEFAULT_TAKEOUT_DRIVE_FOLDER_ID: Final = ""  # empty = search all of My Drive
 OAUTH2_SCOPE_DRIVE_READONLY: Final = "https://www.googleapis.com/auth/drive.readonly"
-OAUTH2_SCOPES_DRIVE: Final = [OAUTH2_SCOPE_DRIVE_READONLY]
+# .../drive.metadata (not .readonly) covers listing *and* mutating metadata
+# (trashing/deleting a file is a metadata-level change, no content access
+# needed for it) - narrower than the full .../auth/drive scope, which would
+# also grant editing/replacing file *content* anywhere in the user's Drive.
+# Only requested/used when "delete after sync" is enabled below.
+OAUTH2_SCOPE_DRIVE_METADATA: Final = "https://www.googleapis.com/auth/drive.metadata"
+OAUTH2_SCOPES_DRIVE: Final = [OAUTH2_SCOPE_DRIVE_READONLY, OAUTH2_SCOPE_DRIVE_METADATA]
 DRIVE_API_BASE: Final = "https://www.googleapis.com/drive/v3"
+
+# Optional: clean up a Drive archive once it has been successfully
+# downloaded AND imported (not just downloaded - see takeout_backend.py).
+# Off by default - trash, not full scope, is what's actually requested
+# above regardless of this setting, so enabling it later needs no reauth.
+CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC: Final = "takeout_drive_delete_after_sync"
+DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC: Final = False
+# False (default) = move to trash (recoverable for ~30 days, but keeps
+# counting against Drive quota until emptied). True = permanently delete
+# immediately (frees quota right away, NOT recoverable) - see README.
+CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY: Final = "takeout_drive_delete_permanently"
+DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY: Final = False
 
 # --- persisted sync state (Store) ------------------------------------------
 STORAGE_VERSION: Final = 1

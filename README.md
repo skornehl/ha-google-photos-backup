@@ -195,16 +195,26 @@ optionally restricted to one Drive folder ID, and downloads new ones
 straight into `takeout_watch_dir`.
 
 0. In the same Google Cloud project as step 1 above, enable the **Google
-   Drive API**, and add the `drive.readonly` scope to the OAuth consent
-   screen's scope list (Data access) - same place you added the Photos
-   scopes for `library_api`, if you've set that up. If you're using
-   `takeout` standalone, you still need a Google Cloud project + OAuth
-   client (Application Credentials) for this, exactly like `library_api`
-   step 1-4, just with `drive.readonly` instead of the Photos scopes.
+   Drive API**, and add both the `drive.readonly` and `drive.metadata`
+   scopes to the OAuth consent screen's scope list (Data access) - same
+   place you added the Photos scopes for `library_api`, if you've set
+   that up. If you're using `takeout` standalone, you still need a Google
+   Cloud project + OAuth client (Application Credentials) for this,
+   exactly like `library_api` step 1-4, just with these two Drive scopes
+   instead of the Photos scopes. Both scopes are requested together as
+   soon as Drive sync is enabled (regardless of whether you turn on the
+   delete option below) - `drive.metadata` grants managing metadata
+   (rename/trash/delete) for **every** file in your Drive, not just
+   Takeout archives; this integration only ever touches files it
+   downloaded itself, but the OAuth grant itself isn't scoped that
+   narrowly (Google doesn't offer a "delete only files matching a
+   pattern" scope). `drive.readonly` similarly grants read access to your
+   whole Drive, needed to actually download archive contents.
 1. Config flow: backend `takeout` → "Enable Google Drive sync" → sign in
    with your Google account → target directory, watch directory,
-   interval, delete-after-import, download links, and (optional) a Drive
-   folder ID to restrict the search to (empty = all of My Drive).
+   interval, delete-after-import, download links, Drive folder ID
+   (optional, empty = all of My Drive), and the two Drive-cleanup options
+   below.
 2. Set up "Scheduled exports" (see step 2 above) with **Drive** as the
    destination - this backend then picks up every new export
    automatically, no external sync tool needed at all.
@@ -212,6 +222,30 @@ straight into `takeout_watch_dir`.
 Drive sync is a setup-time choice - to add it to an existing plain
 `takeout` instance, remove and re-add the integration with the toggle
 checked (same limitation as changing backend type).
+
+##### Cleaning up archives in Drive after import
+
+"Scheduled exports" keep piling up in Drive every 2 months forever unless
+something removes the old ones - which matters if you don't want a
+recurring export saturating your Drive quota (or your connection, see
+"Bandwidth limiting" above, re-downloading multi-GB archives on every
+sync isn't what happens here since already-downloaded files are
+remembered, but the *quota* problem is separate from that).
+
+Two independent options, both off by default, only shown when Drive sync
+is enabled:
+
+- **Delete archive from Drive after successful import**: once an archive
+  downloaded via Drive sync has been *successfully imported* (not just
+  downloaded - a failed extraction leaves it in Drive so nothing is
+  lost), it gets moved to Drive's trash.
+- **Delete permanently instead of moving to trash**: skips the trash
+  entirely. Trash still counts against your Drive quota until it's
+  emptied (manually, or automatically after ~30 days) - if the whole
+  point is freeing up quota immediately for the next scheduled export,
+  you need this option on too. **This is not recoverable** - only enable
+  it once you've confirmed a few sync runs actually produced correct,
+  complete local backups.
 
 #### Large libraries: first full export without Drive storage
 

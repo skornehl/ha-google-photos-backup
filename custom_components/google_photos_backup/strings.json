@@ -35,7 +35,7 @@
       },
       "takeout_drive_choice": {
         "title": "Google Drive sync?",
-        "description": "Optionally poll a Google Drive location directly for new Takeout export archives (as delivered by Takeout's own 'Scheduled exports' feature) and download them in automatically, instead of relying on a separate external sync step into the watch directory. Needs its own Google sign-in with the Drive API (read-only) enabled on the same Google Cloud project used for library_api - see README.",
+        "description": "Optionally poll a Google Drive location directly for new Takeout export archives (as delivered by Takeout's own 'Scheduled exports' feature), download them in automatically, and optionally delete them from Drive again once imported - instead of relying on a separate external sync step into the watch directory. Needs its own Google sign-in granting read access to your whole Drive plus permission to manage (trash/delete) file metadata - the delete itself stays off by default, see the next step. Requires the Drive API enabled on the same Google Cloud project used for library_api - see README.",
         "data": {
           "takeout_drive_sync": "Enable Google Drive sync"
         }
@@ -54,7 +54,7 @@
       },
       "takeout_drive_options": {
         "title": "Configure Takeout backend (with Drive sync)",
-        "description": "Same as the plain Takeout backend, plus an optional Drive folder ID to search in - leave empty to search all of My Drive for 'takeout-*' archives.",
+        "description": "Same as the plain Takeout backend, plus an optional Drive folder ID to search in (leave empty to search all of My Drive for 'takeout-*' archives) and whether to clean up archives in Drive once imported.",
         "data": {
           "target_dir": "Target directory (local mount)",
           "sync_interval_minutes": "Sync interval (minutes)",
@@ -62,7 +62,9 @@
           "takeout_watch_dir": "Watch directory for Takeout archives",
           "takeout_delete_after_import": "Delete archive after successful import",
           "takeout_download_links": "Takeout email download links (one per line, optional)",
-          "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)"
+          "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)",
+          "takeout_drive_delete_after_sync": "Delete archive from Drive after successful import",
+          "takeout_drive_delete_permanently": "Delete permanently instead of moving to trash (frees quota immediately, NOT recoverable)"
         }
       }
     },
@@ -86,7 +88,9 @@
           "sync_interval_minutes": "Sync interval (minutes)",
           "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
           "takeout_download_links": "Takeout email download links (one per line, optional)",
-          "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)"
+          "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)",
+          "takeout_drive_delete_after_sync": "Delete archive from Drive after successful import",
+          "takeout_drive_delete_permanently": "Delete permanently instead of moving to trash (frees quota immediately, NOT recoverable)"
         }
       }
     }
