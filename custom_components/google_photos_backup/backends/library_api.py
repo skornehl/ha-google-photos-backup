@@ -104,41 +104,64 @@ class LibraryApiBackend(BackupBackend):
         if not session_id:
             return
 
-        resp = await self._oauth.async_request(
-            "GET", f"{PICKER_API_BASE}/sessions/{session_id}"
-        )
-        if resp.status == 404:
-            _LOGGER.warning("Picker-Session %s nicht mehr gültig, verwerfe sie", session_id)
-            self._clear_picker_session()
-            return
-        resp.raise_for_status()
-        session = await resp.json()
-        if not session.get("mediaItemsSet"):
-            _LOGGER.debug("Picker-Session %s: Nutzer hat noch nicht abgeschlossen", session_id)
-            return
-
-        target_dir = self.entry.data[CONF_TARGET_DIR]
-        page_token: str | None = None
-        while True:
-            params = {"sessionId": session_id, "pageSize": 100}
-            if page_token:
-                params["pageToken"] = page_token
+        # Listing (session status + paginated mediaItems) is wrapped like
+        # _sync_app_created_items() below - a single transient error (429,
+        # 5xx, network blip) here must degrade to a logged error for this
+        # run, not abort the whole coordinator update the way an unguarded
+        # raise_for_status() would (individual item downloads already
+        # degrade gracefully via _download_picker_item()'s own try/except;
+        # this closes the same gap for the session-management calls around
+        # them).
+        try:
             resp = await self._oauth.async_request(
-                "GET", f"{PICKER_API_BASE}/mediaItems", params=params
+                "GET", f"{PICKER_API_BASE}/sessions/{session_id}"
             )
+            if resp.status == 404:
+                _LOGGER.warning("Picker-Session %s nicht mehr gültig, verwerfe sie", session_id)
+                self._clear_picker_session()
+                return
             resp.raise_for_status()
-            payload = await resp.json()
-            for item in payload.get("mediaItems", []):
-                await self._download_picker_item(item, target_dir, stats)
-            page_token = payload.get("nextPageToken")
-            if not page_token:
-                break
+            session = await resp.json()
+            if not session.get("mediaItemsSet"):
+                _LOGGER.debug("Picker-Session %s: Nutzer hat noch nicht abgeschlossen", session_id)
+                return
 
-        await self._oauth.async_request(
-            "DELETE", f"{PICKER_API_BASE}/sessions/{session_id}"
-        )
-        self._clear_picker_session()
-        _LOGGER.info("Picker-Session %s abgeschlossen und aufgeräumt", session_id)
+            target_dir = self.entry.data[CONF_TARGET_DIR]
+            page_token: str | None = None
+            while True:
+                params = {"sessionId": session_id, "pageSize": 100}
+                if page_token:
+                    params["pageToken"] = page_token
+                resp = await self._oauth.async_request(
+                    "GET", f"{PICKER_API_BASE}/mediaItems", params=params
+                )
+                resp.raise_for_status()
+                payload = await resp.json()
+                for item in payload.get("mediaItems", []):
+                    await self._download_picker_item(item, target_dir, stats)
+                page_token = payload.get("nextPageToken")
+                if not page_token:
+                    break
+        except Exception as err:  # noqa: BLE001
+            stats.errors.append(f"Picker-Session-Verarbeitung fehlgeschlagen: {err}")
+            return
+
+        try:
+            await self._oauth.async_request(
+                "DELETE", f"{PICKER_API_BASE}/sessions/{session_id}"
+            )
+            self._clear_picker_session()
+            _LOGGER.info("Picker-Session %s abgeschlossen und aufgeräumt", session_id)
+        except Exception as err:  # noqa: BLE001
+            # All items in this session are already downloaded and recorded
+            # in processed_ids by this point - losing the DELETE just means
+            # the next run re-checks the same session (Google may 404 it by
+            # then, or return the same mediaItemsSet again, which is
+            # harmless: every item gets skipped via processed_ids). Not
+            # worth treating as a bigger failure than it is.
+            stats.errors.append(
+                f"Picker-Session {session_id} konnte nicht aufgeräumt werden: {err}"
+            )
 
     def _clear_picker_session(self) -> None:
         self.state.set(CONF_PICKER_SESSION_ID, None)
