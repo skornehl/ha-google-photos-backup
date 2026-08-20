@@ -75,6 +75,9 @@ async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_p
     )
 
     oauth = MagicMock()
+    # _sync_drive_folder awaits this before doing anything else - a plain
+    # MagicMock isn't awaitable, so it has to be an AsyncMock too.
+    oauth.async_ensure_token_valid = AsyncMock()
     list_resp = MagicMock()
     list_resp.raise_for_status = MagicMock()
     list_resp.json = AsyncMock(
