@@ -1,13 +1,17 @@
 {
   "domain": "google_photos_backup",
   "name": "Google Photos Backup",
-  "codeowners": ["@skornehl"],
+  "codeowners": [
+    "@skornehl"
+  ],
   "config_flow": true,
-  "dependencies": ["application_credentials"],
+  "dependencies": [
+    "application_credentials"
+  ],
   "documentation": "https://github.com/skornehl/ha-google-photos-backup",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/skornehl/ha-google-photos-backup/issues",
   "requirements": [],
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

@@ -322,6 +322,12 @@ against Python 3.12 and 3.13.
 
 ### Releasing
 
+Current version: see `manifest.json`. Released versions are tagged
+`vX.Y.Z` and published as GitHub Releases — HACS discovers updates
+through those, so a merged fix that never gets released never reaches
+anyone.
+
+
 HACS' update detection relies on `custom_components/google_photos_backup/
 manifest.json`'s `"version"` field (and/or a git tag) changing - bump it
 (SemVer) as part of any PR with a user-visible change, or in a dedicated
