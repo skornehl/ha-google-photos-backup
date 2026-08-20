@@ -43,6 +43,7 @@ from ..const import (
     CONF_PICKER_SESSION_URI,
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
+    DOWNLOAD_TIMEOUT,
     LIBRARY_API_BASE,
     PICKER_API_BASE,
 )
@@ -169,7 +170,9 @@ class LibraryApiBackend(BackupBackend):
 
         limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
         try:
-            resp = await self._oauth.async_request("GET", base_url + suffix)
+            resp = await self._oauth.async_request(
+                "GET", base_url + suffix, timeout=DOWNLOAD_TIMEOUT
+            )
             resp.raise_for_status()
             raw = await throttled_read(resp, limit_kbps)
         except Exception as err:  # noqa: BLE001 - surfaced to the user via sensor

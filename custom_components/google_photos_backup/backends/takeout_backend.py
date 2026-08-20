@@ -71,6 +71,7 @@ from ..const import (
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
     DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
+    DOWNLOAD_TIMEOUT,
     DRIVE_API_BASE,
     TAKEOUT_ARCHIVE_SUFFIXES,
 )
@@ -194,7 +195,9 @@ class TakeoutBackend(BackupBackend):
             _LOGGER.info("Lade Takeout-Archiv von manuellem Link herunter: %s", url)
             dest: Path | None = None
             try:
-                async with session.get(url, allow_redirects=True) as resp:
+                async with session.get(
+                    url, allow_redirects=True, timeout=DOWNLOAD_TIMEOUT
+                ) as resp:
                     resp.raise_for_status()
                     if "html" in resp.headers.get("Content-Type", "").lower():
                         # Most likely a Google sign-in/error page rather than
@@ -299,7 +302,10 @@ class TakeoutBackend(BackupBackend):
             _LOGGER.info("Lade Takeout-Archiv aus Google Drive: %s", name)
             try:
                 resp = await self._oauth.async_request(
-                    "GET", f"{DRIVE_API_BASE}/files/{file_id}", params={"alt": "media"}
+                    "GET",
+                    f"{DRIVE_API_BASE}/files/{file_id}",
+                    params={"alt": "media"},
+                    timeout=DOWNLOAD_TIMEOUT,
                 )
                 resp.raise_for_status()
                 await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
