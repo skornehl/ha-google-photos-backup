@@ -18,7 +18,7 @@ class BackupStats:
     bytes_downloaded: int = 0
     errors: list[str] = field(default_factory=list)
 
-    def merge(self, other: "BackupStats") -> None:
+    def merge(self, other: BackupStats) -> None:
         self.files_downloaded += other.files_downloaded
         self.files_skipped += other.files_skipped
         self.bytes_downloaded += other.bytes_downloaded
