@@ -191,7 +191,10 @@ class TakeoutBackend(BackupBackend):
         for url in urls:
             if url in downloaded:
                 continue
-            _LOGGER.info("Lade Takeout-Archiv von manuellem Link herunter: %s", url)
+            # Truncated like the error message below: these URLs carry
+            # Google-issued auth material in their query string, and HA
+            # logs get pasted into issue reports/diagnostics uploads.
+            _LOGGER.info("Lade Takeout-Archiv von manuellem Link herunter: %s", _redact_url(url))
             dest: Path | None = None
             try:
                 async with session.get(url, allow_redirects=True) as resp:
@@ -210,7 +213,7 @@ class TakeoutBackend(BackupBackend):
                     dest = watch_dir / self._filename_for_link(resp, url, watch_dir)
                     await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
             except Exception as err:  # noqa: BLE001 - surfaced via sensor
-                stats.errors.append(f"Download-Link fehlgeschlagen ({url[:80]}): {err}")
+                stats.errors.append(f"Download-Link fehlgeschlagen ({_redact_url(url)}): {err}")
                 if dest is not None:
                     dest.unlink(missing_ok=True)
                 continue
@@ -499,6 +502,27 @@ class TakeoutBackend(BackupBackend):
                 best_len = prefix_len
                 best = candidate
         return best
+
+
+def _redact_url(url: str) -> str:
+    """Scheme + host + path only, query string dropped.
+
+    Takeout download links carry Google-issued auth material in their
+    query parameters; HA logs and the last_error sensor both end up in
+    issue reports and diagnostics uploads, so the query string must
+    never appear in either. The path is kept because it's what actually
+    helps identify *which* link failed.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "<nicht parsebare URL>"
+    if not parts.scheme and not parts.netloc:
+        return "<nicht parsebare URL>"
+    redacted = f"{parts.scheme}://{parts.netloc}{parts.path}"
+    if parts.query:
+        redacted += "?<redacted>"
+    return redacted
 
 
 def _common_prefix_len(a: str, b: str) -> int:
