@@ -39,11 +39,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
 
 from ..const import (
+    BASEURL_MAX_AGE_SECONDS,
     CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_PICKER_SESSION_EXPIRES,
     CONF_PICKER_SESSION_ID,
     CONF_PICKER_SESSION_URI,
-    BASEURL_MAX_AGE_SECONDS,
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
     DOWNLOAD_TIMEOUT,
