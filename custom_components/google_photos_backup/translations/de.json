@@ -11,6 +11,10 @@
       "pick_implementation": {
         "title": "Google-Konto auswählen"
       },
+      "reauth_confirm": {
+        "title": "Google Photos Backup erneut autorisieren",
+        "description": "Google hat die gespeicherte Berechtigung für diese Instanz abgelehnt (widerrufen, abgelaufen oder Scope geändert) - erneut anmelden, damit die Backups weiterlaufen."
+      },
       "library_api_options": {
         "title": "Zielverzeichnis & Intervall",
         "description": "Achtung: Dieses Backend sieht per API nur Medien, die von dieser Integration selbst hochgeladen wurden, plus was du über eine Picker-Session manuell auswählst (Service start_picker_session). Es liest NICHT automatisch deine gesamte bestehende Bibliothek.",
@@ -75,6 +79,7 @@
     },
     "abort": {
       "already_configured": "Diese Instanz ist bereits konfiguriert",
+      "reauth_successful": "Erneute Autorisierung erfolgreich",
       "oauth_error": "Fehler beim Empfang der OAuth2-Token-Daten",
       "oauth_timeout": "Zeitüberschreitung beim Warten auf Autorisierung",
       "missing_configuration": "Die Integration ist nicht richtig konfiguriert (Application Credentials fehlen). Siehe README."

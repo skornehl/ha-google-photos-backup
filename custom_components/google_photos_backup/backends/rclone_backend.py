@@ -28,6 +28,7 @@ from ..const import (
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
     DEFAULT_RCLONE_BINARY,
+    RCLONE_TIMEOUT_SECONDS,
 )
 from .base import BackupBackend, BackupStats
 from .fsutil import ensure_target_dir
@@ -36,6 +37,19 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class RcloneBackend(BackupBackend):
+    def __init__(self, hass, entry, state) -> None:
+        super().__init__(hass, entry, state)
+        self._proc: asyncio.subprocess.Process | None = None
+
+    async def async_terminate(self) -> None:
+        """Kill an in-flight rclone subprocess, if any - called on
+        unload/reload so a sync in progress doesn't keep running detached
+        from HA (see issue #6)."""
+        if self._proc is not None and self._proc.returncode is None:
+            _LOGGER.warning("Beende laufenden rclone-Prozess (Unload/Reload)")
+            self._proc.kill()
+            await self._proc.wait()
+
     async def async_validate(self) -> None:
         target_dir = self.entry.data[CONF_TARGET_DIR]
         await self.hass.async_add_executor_job(ensure_target_dir, target_dir)
@@ -86,12 +100,29 @@ class RcloneBackend(BackupBackend):
             args += ["--bwlimit", f"{limit_kbps}k"]
 
         _LOGGER.debug("rclone Aufruf: %s", " ".join(args))
-        proc = await asyncio.create_subprocess_exec(
+        self._proc = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        proc = self._proc
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=RCLONE_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            stats.errors.append(
+                f"rclone-Prozess nach {RCLONE_TIMEOUT_SECONDS}s ohne Abschluss "
+                "abgebrochen (vermutlich hängender Prozess - ein normaler, "
+                "gedrosselter Großtransfer sollte diese großzügige Grenze "
+                "nicht erreichen)."
+            )
+            return stats
+        finally:
+            self._proc = None
+
         self._parse_json_log(stderr.decode(errors="replace"), stats)
         self._parse_json_log(stdout.decode(errors="replace"), stats)
 

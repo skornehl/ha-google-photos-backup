@@ -54,8 +54,11 @@ import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -71,10 +74,12 @@ from ..const import (
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
     DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
+    DOWNLOAD_TIMEOUT,
     DRIVE_API_BASE,
+    OAUTH2_SCOPES_DRIVE,
     TAKEOUT_ARCHIVE_SUFFIXES,
 )
-from .base import BackupBackend, BackupStats
+from .base import BackupBackend, BackupStats, SyncStateStore
 from .fsutil import dest_dir_for_date, ensure_target_dir, sha256_file, unique_destination
 from .throttle import throttled_stream_to_file
 
@@ -92,11 +97,17 @@ SIDECAR_PATTERNS = (
 
 
 class TakeoutBackend(BackupBackend):
+    # Only relevant when Drive sync is enabled - the plain-takeout path
+    # never goes through OAuth at all (see config_flow's
+    # async_step_takeout_drive_choice, which decides that before any
+    # authorize URL is built).
+    oauth_scopes = OAUTH2_SCOPES_DRIVE
+
     def __init__(
         self,
-        hass,
-        entry,
-        state,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        state: SyncStateStore,
         oauth_session: config_entry_oauth2_flow.OAuth2Session | None = None,
     ) -> None:
         """`oauth_session` is only set when Drive sync is enabled - see
@@ -161,7 +172,7 @@ class TakeoutBackend(BackupBackend):
                     await self._cleanup_drive_file(drive_file_id, archive.name, stats)
 
             if delete_local_after:
-                archive.unlink(missing_ok=True)
+                await self.hass.async_add_executor_job(archive.unlink, True)
 
         return stats
 
@@ -191,10 +202,15 @@ class TakeoutBackend(BackupBackend):
         for url in urls:
             if url in downloaded:
                 continue
-            _LOGGER.info("Lade Takeout-Archiv von manuellem Link herunter: %s", url)
+            # Truncated like the error message below: these URLs carry
+            # Google-issued auth material in their query string, and HA
+            # logs get pasted into issue reports/diagnostics uploads.
+            _LOGGER.info("Lade Takeout-Archiv von manuellem Link herunter: %s", _redact_url(url))
             dest: Path | None = None
             try:
-                async with session.get(url, allow_redirects=True) as resp:
+                async with session.get(
+                    url, allow_redirects=True, timeout=DOWNLOAD_TIMEOUT
+                ) as resp:
                     resp.raise_for_status()
                     if "html" in resp.headers.get("Content-Type", "").lower():
                         # Most likely a Google sign-in/error page rather than
@@ -207,19 +223,26 @@ class TakeoutBackend(BackupBackend):
                             "Google-Browser-Session. Archiv stattdessen manuell "
                             "herunterladen und in takeout_watch_dir legen."
                         )
-                    dest = watch_dir / self._filename_for_link(resp, url, watch_dir)
+                    proposed_name = self._proposed_filename_for_link(resp, url)
+                    name = await self.hass.async_add_executor_job(
+                        self._resolve_unique_filename, watch_dir, proposed_name
+                    )
+                    dest = watch_dir / name
                     await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
             except Exception as err:  # noqa: BLE001 - surfaced via sensor
-                stats.errors.append(f"Download-Link fehlgeschlagen ({url[:80]}): {err}")
+                stats.errors.append(f"Download-Link fehlgeschlagen ({_redact_url(url)}): {err}")
                 if dest is not None:
-                    dest.unlink(missing_ok=True)
+                    await self.hass.async_add_executor_job(dest.unlink, True)
                 continue
 
             downloaded.append(url)
             self.state.set("downloaded_takeout_links", downloaded)
 
     @staticmethod
-    def _filename_for_link(resp, url: str, watch_dir: Path) -> str:
+    def _proposed_filename_for_link(resp, url: str) -> str:
+        """Pure string logic, no filesystem access - safe to call directly
+        from a coroutine. See _resolve_unique_filename() for the part that
+        actually needs to touch the filesystem."""
         disposition = resp.headers.get("Content-Disposition", "")
         match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition)
         if match:
@@ -228,9 +251,16 @@ class TakeoutBackend(BackupBackend):
             name = Path(urlsplit(url).path).name
         if not name or not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
             name = f"takeout_link_{abs(hash(url)) % 10_000_000}.zip"
-        # Two different email links could coincidentally suggest the same
-        # filename (Google reuses "takeout-...-001.zip" numbering per
-        # export) - never overwrite an existing file.
+        return name
+
+    @staticmethod
+    def _resolve_unique_filename(watch_dir: Path, name: str) -> str:
+        """Blocking (stat() calls) - always call via async_add_executor_job.
+
+        Two different email links could coincidentally suggest the same
+        filename (Google reuses "takeout-...-001.zip" numbering per
+        export) - never overwrite an existing file.
+        """
         candidate = watch_dir / name
         if not candidate.exists():
             return name
@@ -255,12 +285,12 @@ class TakeoutBackend(BackupBackend):
         if folder_id:
             query += f" and '{folder_id}' in parents"
 
-        files: list[dict] = []
+        files: list[dict[str, Any]] = []
         page_token: str | None = None
         while True:
             params = {
                 "q": query,
-                "fields": "nextPageToken, files(id, name)",
+                "fields": "nextPageToken, files(id, name, size)",
                 "pageSize": 100,
                 "spaces": "drive",
             }
@@ -281,36 +311,74 @@ class TakeoutBackend(BackupBackend):
         for entry in files:
             file_id = entry.get("id")
             name = entry.get("name", "")
+            drive_size = entry.get("size")
             if not file_id or file_id in downloaded_ids:
                 continue
             if not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
                 continue
 
             dest = watch_dir / name
-            if dest.exists():
-                # Already on disk from a previous run that crashed/restarted
-                # before recording state - trust the existing file over
-                # re-downloading a potentially huge archive.
-                downloaded_ids.append(file_id)
-                self.state.set("downloaded_drive_file_ids", downloaded_ids)
-                self._remember_drive_file(name, file_id)
-                continue
+            if await self.hass.async_add_executor_job(dest.exists):
+                if await self.hass.async_add_executor_job(
+                    self._local_file_matches_drive_size, dest, drive_size
+                ):
+                    # Already on disk from a previous run that crashed/
+                    # restarted before recording state, and the size on
+                    # disk matches what Drive reports - trust the existing
+                    # file over re-downloading a potentially huge archive.
+                    downloaded_ids.append(file_id)
+                    self.state.set("downloaded_drive_file_ids", downloaded_ids)
+                    self._remember_drive_file(name, file_id)
+                    continue
+                # Exists but doesn't match Drive's reported size - most
+                # likely a truncated download from a crash mid-write.
+                # Trusting it would silently and permanently skip backing
+                # up this archive (see issue #2): discard and re-download.
+                _LOGGER.warning(
+                    "Vorhandene Datei %s stimmt nicht mit der Drive-Dateigröße "
+                    "überein (vermutlich abgebrochener Download) - wird neu "
+                    "heruntergeladen.",
+                    name,
+                )
+                await self.hass.async_add_executor_job(dest.unlink)
 
             _LOGGER.info("Lade Takeout-Archiv aus Google Drive: %s", name)
             try:
                 resp = await self._oauth.async_request(
-                    "GET", f"{DRIVE_API_BASE}/files/{file_id}", params={"alt": "media"}
+                    "GET",
+                    f"{DRIVE_API_BASE}/files/{file_id}",
+                    params={"alt": "media"},
+                    timeout=DOWNLOAD_TIMEOUT,
                 )
                 resp.raise_for_status()
                 await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
             except Exception as err:  # noqa: BLE001
                 stats.errors.append(f"Drive-Download {name} fehlgeschlagen: {err}")
-                dest.unlink(missing_ok=True)
+                await self.hass.async_add_executor_job(dest.unlink, True)
                 continue
 
             downloaded_ids.append(file_id)
             self.state.set("downloaded_drive_file_ids", downloaded_ids)
             self._remember_drive_file(name, file_id)
+
+    @staticmethod
+    def _local_file_matches_drive_size(dest: Path, drive_size: object) -> bool:
+        """Compare an existing local file's size against what Drive
+        reported for it, to distinguish "fully downloaded, only the state
+        write was missed" from "crashed mid-download, file is truncated".
+
+        `drive_size` is whatever `files.list`'s `size` field returned -
+        normally a numeric string, but treated defensively since it's
+        external API data. If Drive didn't report a size at all, falls
+        back to trusting existence (the pre-fix behavior), rather than
+        being stricter than the API itself.
+        """
+        if drive_size is None:
+            return True
+        try:
+            return dest.stat().st_size == int(drive_size)
+        except (OSError, TypeError, ValueError):
+            return False
 
     def _remember_drive_file(self, name: str, file_id: str) -> None:
         """Record which Drive file a watch_dir archive came from, so
@@ -325,6 +393,13 @@ class TakeoutBackend(BackupBackend):
         after it has been successfully imported. Only called when
         CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC is on - see async_run_backup.
         """
+        if self._oauth is None:
+            # Only reachable if an archive was recorded in
+            # drive_file_id_by_name while Drive sync was on and the entry
+            # was later reconfigured without it. Nothing to clean up
+            # against, and definitely not worth raising over.
+            return
+
         permanently = self._option(
             CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY, DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY
         )
@@ -350,6 +425,7 @@ class TakeoutBackend(BackupBackend):
     def _import_archive(self, archive: Path, target_dir: str, stats: BackupStats) -> None:
         with tempfile.TemporaryDirectory(prefix="gpb_takeout_") as tmp:
             tmp_path = Path(tmp)
+            self._check_free_space(archive, tmp_path)
             self._extract(archive, tmp_path)
             media_files = [
                 p
@@ -360,14 +436,51 @@ class TakeoutBackend(BackupBackend):
                 self._import_media_file(media_file, target_dir, stats)
 
     @staticmethod
+    def _check_free_space(archive: Path, extract_dir: Path) -> None:
+        """Fail fast with a clear message if the extraction target is
+        obviously too small for this archive.
+
+        Without this the extraction still fails safely (the
+        TemporaryDirectory context manager cleans up, and the archive
+        isn't marked processed, so it's retried next run) - but only
+        with a bare OSError: [Errno 28] surfaced on the last_error
+        sensor, which reads like a bug rather than "your disk is full".
+
+        Uses the compressed archive size as the estimate, times a
+        modest safety factor. Takeout archives are overwhelmingly
+        already-compressed JPEG/MP4 payloads, so uncompressed size is
+        close to compressed size - deliberately not trying to read the
+        real uncompressed size from the archive headers, which would
+        mean opening every archive twice. This is a cheap sanity check
+        for the obvious case, not a guarantee.
+        """
+        try:
+            archive_size = archive.stat().st_size
+            free = shutil.disk_usage(extract_dir).free
+        except OSError:
+            return  # Can't tell - let the extraction itself decide.
+
+        required = int(archive_size * 1.2)
+        if free < required:
+            raise ValueError(
+                f"Zu wenig freier Speicherplatz zum Entpacken: {archive.name} "
+                f"benötigt ca. {required // (1024 * 1024)} MiB, verfügbar sind nur "
+                f"{free // (1024 * 1024)} MiB unter {extract_dir}. Archiv bleibt "
+                "liegen und wird beim nächsten Lauf erneut versucht."
+            )
+
+    @staticmethod
     def _extract(archive: Path, dest: Path) -> None:
         name = archive.name.lower()
         if name.endswith(".zip"):
+            # zipfile has sanitized member paths (strips '..'/absolute
+            # components) in the stdlib for a long time - no extra check
+            # needed here, unlike tarfile below.
             with zipfile.ZipFile(archive) as zf:
                 zf.extractall(dest)
         elif name.endswith(".tgz") or name.endswith(".tar.gz"):
             with tarfile.open(archive, "r:gz") as tf:
-                tf.extractall(dest)
+                _safe_tar_extractall(tf, dest)
         else:
             raise ValueError(f"Unbekanntes Archivformat: {archive.name}")
 
@@ -428,6 +541,27 @@ class TakeoutBackend(BackupBackend):
         return best
 
 
+def _redact_url(url: str) -> str:
+    """Scheme + host + path only, query string dropped.
+
+    Takeout download links carry Google-issued auth material in their
+    query parameters; HA logs and the last_error sensor both end up in
+    issue reports and diagnostics uploads, so the query string must
+    never appear in either. The path is kept because it's what actually
+    helps identify *which* link failed.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "<nicht parsebare URL>"
+    if not parts.scheme and not parts.netloc:
+        return "<nicht parsebare URL>"
+    redacted = f"{parts.scheme}://{parts.netloc}{parts.path}"
+    if parts.query:
+        redacted += "?<redacted>"
+    return redacted
+
+
 def _common_prefix_len(a: str, b: str) -> int:
     n = 0
     for ca, cb in zip(a, b):
@@ -435,3 +569,44 @@ def _common_prefix_len(a: str, b: str) -> int:
             break
         n += 1
     return n
+
+
+def _safe_tar_extractall(tf: tarfile.TarFile, dest: Path) -> None:
+    """Extract a tar archive, rejecting any member that would land outside
+    `dest` or that is a symlink/hardlink (path traversal / "Zip Slip" for
+    tar, CVE-2007-4559).
+
+    Unlike zipfile, tarfile.extractall() only defends against this by
+    default starting with Python 3.14 (PEP 706's `filter="data"` becoming
+    the default). Takeout .tgz archives can reach this code via the
+    download-links feature (arbitrary user-pasted URLs) or Drive sync, not
+    just manually placed files, so this can't rely on "Google is trusted"
+    - and Home Assistant can run on Python versions well before 3.14.
+
+    Strategy: prefer the real `filter="data"` where available (Python
+    3.12+, does more than just path-traversal checking - also drops
+    dangerous permission bits etc.); on older Python where `extractall()`
+    doesn't accept `filter` at all, fall back to a manual check that
+    covers at least the path-traversal and symlink/hardlink cases.
+    """
+    try:
+        tf.extractall(dest, filter="data")
+        return
+    except TypeError:
+        pass  # Python < 3.12: extractall() has no `filter` parameter yet.
+
+    dest_resolved = dest.resolve()
+    for member in tf.getmembers():
+        if member.issym() or member.islnk():
+            raise ValueError(
+                f"Takeout-Archiv enthält einen Symlink/Hardlink, wird abgelehnt: {member.name}"
+            )
+        member_path = (dest / member.name).resolve()
+        try:
+            member_path.relative_to(dest_resolved)
+        except ValueError:
+            raise ValueError(
+                "Takeout-Archiv enthält einen Pfad außerhalb des Zielverzeichnisses "
+                f"(möglicher Path-Traversal-Versuch): {member.name}"
+            ) from None
+    tf.extractall(dest)
