@@ -1,7 +1,6 @@
 """Constants for the Google Photos Backup integration."""
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "google_photos_backup"
@@ -34,9 +33,6 @@ DRIVE_DOWNLOAD_FLUSH_SIZE: Final = 8 * 1024 * 1024  # buffered writes for large 
 OAUTH2_SCOPE_APPCREATED_READONLY: Final = (
     "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata"
 )
-OAUTH2_SCOPE_APPENDONLY: Final = (
-    "https://www.googleapis.com/auth/photoslibrary.appendonly"
-)
 # Picker API scope - the only way left to let a user select from their
 # *entire*, pre-existing library. Verify against
 # https://developers.google.com/photos/picker at setup time; Google has
@@ -58,7 +54,6 @@ PICKER_API_BASE: Final = "https://photospicker.googleapis.com/v1"
 CONF_PICKER_SESSION_ID: Final = "picker_session_id"
 CONF_PICKER_SESSION_URI: Final = "picker_session_uri"
 CONF_PICKER_SESSION_EXPIRES: Final = "picker_session_expires"
-DEFAULT_PICKER_POLL_INTERVAL: Final = timedelta(seconds=5)
 
 # --- rclone backend ------------------------------------------------------------
 CONF_RCLONE_BINARY: Final = "rclone_binary"
@@ -124,11 +119,11 @@ STORAGE_KEY_TEMPLATE: Final = f"{DOMAIN}_{{entry_id}}"
 PLATFORMS: Final = ["sensor"]
 SERVICE_BACKUP_NOW: Final = "backup_now"
 SERVICE_START_PICKER_SESSION: Final = "start_picker_session"
-UPDATE_INTERVAL_FALLBACK: Final = timedelta(minutes=DEFAULT_SYNC_INTERVAL_MINUTES)
 
+# Sensor keys - also used as translation_key / unique_id suffix, see
+# sensor.py. Kept as constants rather than repeated string literals so a
+# typo in one place can't silently desync from the other.
 ATTR_LAST_SYNC: Final = "last_sync"
 ATTR_FILES_BACKED_UP: Final = "files_backed_up"
 ATTR_LAST_ERROR: Final = "last_error"
-
-MAX_DOWNLOAD_RETRIES: Final = 3
-RETRY_BACKOFF_BASE_SECONDS: Final = 5
+ATTR_FREE_SPACE: Final = "free_space"
