@@ -28,19 +28,24 @@ def test_download_timeout_has_no_total_cap_but_bounds_stalls():
     assert DOWNLOAD_TIMEOUT.sock_connect is not None
 
 
-async def test_library_api_item_download_passes_explicit_timeout(monkeypatch):
+async def test_library_api_item_download_passes_explicit_timeout(monkeypatch, tmp_path):
     import custom_components.google_photos_backup.backends.library_api as library_api_module
 
-    async def _fake_throttled_read(resp, limit_kbps):
-        return b"fake bytes"
+    async def _fake_stream_to_file(resp, dest, hass, limit_kbps):
+        dest.write_bytes(b"fake bytes")
+        return len(b"fake bytes")
 
-    monkeypatch.setattr(library_api_module, "throttled_read", _fake_throttled_read)
+    monkeypatch.setattr(
+        library_api_module, "throttled_stream_to_file", _fake_stream_to_file
+    )
 
-    entry = SimpleNamespace(data={CONF_TARGET_DIR: "/media/x"}, options={})
+    entry = SimpleNamespace(data={CONF_TARGET_DIR: str(tmp_path)}, options={})
     oauth = MagicMock()
     oauth.async_request = AsyncMock(return_value=MagicMock())
+    # Runs the callable for real, so unique_destination()/os.utime() do
+    # what they'd do in production instead of returning a canned value.
     hass = MagicMock()
-    hass.async_add_executor_job = AsyncMock(return_value=10)
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
 
     backend = LibraryApiBackend(hass, entry, SyncStateStore({}), oauth_session=oauth)
     stats = BackupStats()
@@ -55,7 +60,7 @@ async def test_library_api_item_download_passes_explicit_timeout(monkeypatch):
                 "mimeType": "image/jpeg",
             },
         },
-        "/media/x",
+        str(tmp_path),
         stats,
     )
 

@@ -26,7 +26,7 @@ MIN_SYNC_INTERVAL_MINUTES: Final = 5
 # rclone passes it straight through as its own --bwlimit flag.
 CONF_BANDWIDTH_LIMIT_KBPS: Final = "bandwidth_limit_kbps"
 DEFAULT_BANDWIDTH_LIMIT_KBPS: Final = 0  # 0 = unlimited
-DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB, used by throttled in-memory reads
+DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB per network read while streaming
 DRIVE_DOWNLOAD_FLUSH_SIZE: Final = 8 * 1024 * 1024  # buffered writes for large archives
 
 # Explicit per-request timeout for the actual byte-content downloads
