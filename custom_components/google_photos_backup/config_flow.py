@@ -179,7 +179,7 @@ class GooglePhotosBackupFlowHandler(
     # -- reauth: token refresh failed (revoked/expired grant), see
     # coordinator.py's ConfigEntryAuthFailed handling ------------------------
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         # Called by HA when a previous async_setup_entry/coordinator update
         # raised ConfigEntryAuthFailed for this entry. `entry_data` is the
         # failing entry's existing `.data` - carry forward CONF_BACKEND (and
@@ -193,7 +193,7 @@ class GooglePhotosBackupFlowHandler(
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is None:
             return self.async_show_form(step_id="reauth_confirm")
         return await self.async_step_pick_implementation()
@@ -210,6 +210,12 @@ class GooglePhotosBackupFlowHandler(
 
         if self.source == config_entries.SOURCE_REAUTH:
             existing_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+            if existing_entry is None:
+                # The entry was removed while the user was off completing
+                # the Google sign-in - nothing left to write the new token
+                # to, and dereferencing it here would raise AttributeError
+                # mid-flow.
+                return self.async_abort(reason="reauth_entry_missing")
             self.hass.config_entries.async_update_entry(existing_entry, data=self._data)
             await self.hass.config_entries.async_reload(existing_entry.entry_id)
             return self.async_abort(reason="reauth_successful")
@@ -287,7 +293,7 @@ class GooglePhotosBackupFlowHandler(
             step_id="takeout_drive_options", data_schema=_takeout_schema(drive_enabled=True)
         )
 
-    async def _async_finalize_entry(self, title: str) -> FlowResult:
+    async def _async_finalize_entry(self, title: str) -> ConfigFlowResult:
         """Guard against configuring the same backend + target directory
         twice (see issue #4) before actually creating the entry - called
         from every async_create_entry() call site above.
