@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -65,7 +66,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._store: Store = Store(
             hass, STORAGE_VERSION, STORAGE_KEY_TEMPLATE.format(entry_id=entry.entry_id)
         )
-        self._state_data: dict = {}
+        self._state_data: dict[str, Any] = {}
         self.backend: BackupBackend | None = None
         self._files_backed_up_total = 0
 

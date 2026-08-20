@@ -36,12 +36,15 @@ async def async_create_backend(
         return RcloneBackend(hass, entry, state)
 
     if backend_type == BACKEND_TAKEOUT:
-        oauth_session = None
+        # Distinct name from the library_api branch above: that one binds
+        # a non-Optional OAuth2Session, and Python doesn't allow
+        # re-annotating an already-bound name in the same scope.
+        takeout_oauth: config_entry_oauth2_flow.OAuth2Session | None = None
         if entry.data.get(CONF_TAKEOUT_DRIVE_SYNC):
             implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(
                 hass, entry
             )
-            oauth_session = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
-        return TakeoutBackend(hass, entry, state, oauth_session=oauth_session)
+            takeout_oauth = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
+        return TakeoutBackend(hass, entry, state, oauth_session=takeout_oauth)
 
     raise ValueError(f"Unbekanntes Backend: {backend_type}")

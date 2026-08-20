@@ -14,7 +14,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import config_entry_oauth2_flow, selector
 
 from .const import (
@@ -154,7 +154,7 @@ class GooglePhotosBackupFlowHandler(
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is not None:
             self._data[CONF_BACKEND] = user_input[CONF_BACKEND]
             if user_input[CONF_BACKEND] == BACKEND_LIBRARY_API:
@@ -174,7 +174,7 @@ class GooglePhotosBackupFlowHandler(
 
     # -- OAuth2 dispatch: library_api options, or takeout+Drive options ------
 
-    async def async_oauth_create_entry(self, data: dict[str, Any]) -> FlowResult:
+    async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:
         # Called by AbstractOAuth2FlowHandler once the OAuth dance succeeds.
         # `data` holds {"auth_implementation": ..., "token": {...}} - stash
         # it and ask for the remaining fields before finalizing. Which
@@ -186,7 +186,7 @@ class GooglePhotosBackupFlowHandler(
 
     async def async_step_library_api_options(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is not None:
             self._data.update(user_input)
             return await self._async_finalize_entry("Google Photos Backup (Picker/Library API)")
@@ -196,7 +196,7 @@ class GooglePhotosBackupFlowHandler(
 
     async def async_step_rclone(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             self._data.update(user_input)
@@ -216,7 +216,7 @@ class GooglePhotosBackupFlowHandler(
 
     async def async_step_takeout_drive_choice(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Ask up front whether to enable Drive sync, since that decides
         whether we route through OAuth at all - can't be decided later
         inside a plain form step."""
@@ -233,7 +233,7 @@ class GooglePhotosBackupFlowHandler(
 
     async def async_step_takeout(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Plain-takeout path: no Drive sync, so no OAuth needed."""
         if user_input is not None:
             self._data.update(user_input)
@@ -244,7 +244,7 @@ class GooglePhotosBackupFlowHandler(
 
     async def async_step_takeout_drive_options(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Takeout-with-Drive-sync path: reached after OAuth succeeds."""
         if user_input is not None:
             self._data.update(user_input)
@@ -295,7 +295,7 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 

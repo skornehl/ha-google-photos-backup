@@ -1,6 +1,9 @@
 """Status sensors for a Google Photos Backup config entry."""
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -52,7 +55,7 @@ class LastSyncSensor(_BaseSensor):
         super().__init__(coordinator, entry, "last_sync")
 
     @property
-    def native_value(self):
+    def native_value(self) -> datetime | None:
         return self.coordinator.data.last_sync if self.coordinator.data else None
 
 
@@ -65,11 +68,11 @@ class FilesBackedUpSensor(_BaseSensor):
         super().__init__(coordinator, entry, "files_backed_up")
 
     @property
-    def native_value(self):
+    def native_value(self) -> int | None:
         return self.coordinator.data.files_backed_up_total if self.coordinator.data else None
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         if not self.coordinator.data:
             return {}
         return {
@@ -85,14 +88,14 @@ class LastErrorSensor(_BaseSensor):
         super().__init__(coordinator, entry, "last_error")
 
     @property
-    def native_value(self):
+    def native_value(self) -> str:
         if not self.coordinator.data or not self.coordinator.data.last_run_errors:
             return "Keine"
         first = self.coordinator.data.last_run_errors[0]
         return first[:255]
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict[str, Any]:
         if not self.coordinator.data:
             return {}
         return {"alle_fehler": self.coordinator.data.last_run_errors}
@@ -108,7 +111,7 @@ class FreeSpaceSensor(_BaseSensor):
         super().__init__(coordinator, entry, "free_space")
 
     @property
-    def native_value(self):
+    def native_value(self) -> float | None:
         if not self.coordinator.data or self.coordinator.data.free_space_bytes is None:
             return None
         return round(self.coordinator.data.free_space_bytes / 1_000_000_000, 2)

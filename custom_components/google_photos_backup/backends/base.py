@@ -1,6 +1,7 @@
 """Shared interface every backup backend implements."""
 from __future__ import annotations
 
+import builtins
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,8 +47,11 @@ class SyncStateStore:
         self.data[key] = value
 
     @property
-    def processed_hashes(self) -> set[str]:
-        return set(self.data.setdefault("processed_hashes", []))
+    def processed_hashes(self) -> builtins.set[str]:
+        # builtins.set, not set: this class defines a method named `set`,
+        # which shadows the builtin inside the class body - a bare
+        # `set[str]` annotation here resolves to SyncStateStore.set.
+        return builtins.set(self.data.setdefault("processed_hashes", []))
 
     def add_processed_hash(self, digest: str) -> None:
         hashes: list[str] = self.data.setdefault("processed_hashes", [])
