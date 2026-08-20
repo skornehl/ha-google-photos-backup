@@ -260,7 +260,7 @@ class TakeoutBackend(BackupBackend):
         while True:
             params = {
                 "q": query,
-                "fields": "nextPageToken, files(id, name)",
+                "fields": "nextPageToken, files(id, name, size)",
                 "pageSize": 100,
                 "spaces": "drive",
             }
@@ -281,20 +281,36 @@ class TakeoutBackend(BackupBackend):
         for entry in files:
             file_id = entry.get("id")
             name = entry.get("name", "")
+            drive_size = entry.get("size")
             if not file_id or file_id in downloaded_ids:
                 continue
             if not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
                 continue
 
             dest = watch_dir / name
-            if dest.exists():
-                # Already on disk from a previous run that crashed/restarted
-                # before recording state - trust the existing file over
-                # re-downloading a potentially huge archive.
-                downloaded_ids.append(file_id)
-                self.state.set("downloaded_drive_file_ids", downloaded_ids)
-                self._remember_drive_file(name, file_id)
-                continue
+            if await self.hass.async_add_executor_job(dest.exists):
+                if await self.hass.async_add_executor_job(
+                    self._local_file_matches_drive_size, dest, drive_size
+                ):
+                    # Already on disk from a previous run that crashed/
+                    # restarted before recording state, and the size on
+                    # disk matches what Drive reports - trust the existing
+                    # file over re-downloading a potentially huge archive.
+                    downloaded_ids.append(file_id)
+                    self.state.set("downloaded_drive_file_ids", downloaded_ids)
+                    self._remember_drive_file(name, file_id)
+                    continue
+                # Exists but doesn't match Drive's reported size - most
+                # likely a truncated download from a crash mid-write.
+                # Trusting it would silently and permanently skip backing
+                # up this archive (see issue #2): discard and re-download.
+                _LOGGER.warning(
+                    "Vorhandene Datei %s stimmt nicht mit der Drive-Dateigröße "
+                    "überein (vermutlich abgebrochener Download) - wird neu "
+                    "heruntergeladen.",
+                    name,
+                )
+                await self.hass.async_add_executor_job(dest.unlink)
 
             _LOGGER.info("Lade Takeout-Archiv aus Google Drive: %s", name)
             try:
@@ -311,6 +327,25 @@ class TakeoutBackend(BackupBackend):
             downloaded_ids.append(file_id)
             self.state.set("downloaded_drive_file_ids", downloaded_ids)
             self._remember_drive_file(name, file_id)
+
+    @staticmethod
+    def _local_file_matches_drive_size(dest: Path, drive_size: object) -> bool:
+        """Compare an existing local file's size against what Drive
+        reported for it, to distinguish "fully downloaded, only the state
+        write was missed" from "crashed mid-download, file is truncated".
+
+        `drive_size` is whatever `files.list`'s `size` field returned -
+        normally a numeric string, but treated defensively since it's
+        external API data. If Drive didn't report a size at all, falls
+        back to trusting existence (the pre-fix behavior), rather than
+        being stricter than the API itself.
+        """
+        if drive_size is None:
+            return True
+        try:
+            return dest.stat().st_size == int(drive_size)
+        except (OSError, TypeError, ValueError):
+            return False
 
     def _remember_drive_file(self, name: str, file_id: str) -> None:
         """Record which Drive file a watch_dir archive came from, so
