@@ -35,7 +35,20 @@ class BackupData:
 
 
 class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
-    """Owns the persisted sync state and the active backend instance."""
+    """Owns the persisted sync state and the active backend instance.
+
+    Sensors update once per completed run, not continuously during one
+    (see issue #21): a long initial import can therefore sit "quiet" for
+    a while before the numbers jump. That's a deliberate trade-off -
+    mid-run progress would mean either the backend reaching back into
+    the coordinator to push partial BackupStats (coupling the two in
+    the one direction this design deliberately avoids - see
+    backends/base.py) or a second state channel next to
+    _async_update_data's return value. The last_sync sensor's timestamp
+    plus the archive-level INFO logs cover "is it doing anything?"
+    well enough in practice. Worth revisiting only alongside a real
+    progress API on BackupBackend.
+    """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         interval_minutes = entry.options.get(

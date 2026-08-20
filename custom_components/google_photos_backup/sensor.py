@@ -8,7 +8,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_BACKEND, DOMAIN
 from .coordinator import GooglePhotosBackupCoordinator
 
 
@@ -37,6 +37,10 @@ class _BaseSensor(CoordinatorEntity[GooglePhotosBackupCoordinator], SensorEntity
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,
             manufacturer="Google Photos Backup",
+            # Which backend this instance uses, surfaced in the device
+            # dialog so two entries (e.g. one takeout, one rclone) are
+            # distinguishable by more than just their title.
+            model=entry.data.get(CONF_BACKEND),
             entry_type=DeviceEntryType.SERVICE,
         )
 
