@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from aiohttp import ClientResponseError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -23,6 +25,17 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Status codes from a failed OAuth token refresh (see
+# config_entry_oauth2_flow.OAuth2Session.async_ensure_token_valid(), which
+# raises the aiohttp response's own ClientResponseError via
+# raise_for_status() on a non-2xx token endpoint response) that mean "the
+# grant itself is bad" - revoked/expired refresh token, wrong scope, etc. -
+# rather than a transient network/server problem. Distinguishing this
+# matters: only these should trigger HA's reauth flow via
+# ConfigEntryAuthFailed; anything else (5xx, timeouts, ...) should just be
+# a normal, retried UpdateFailed.
+AUTH_FAILURE_STATUS_CODES = {400, 401, 403}
 
 
 @dataclass
@@ -75,12 +88,28 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._files_backed_up_total = self._state_data.get("files_backed_up_total", 0)
         state = SyncStateStore(self._state_data)
         self.backend = await async_create_backend(self.hass, self.entry, state)
-        await self.backend.async_validate()
+        try:
+            await self.backend.async_validate()
+        except ClientResponseError as err:
+            if err.status in AUTH_FAILURE_STATUS_CODES:
+                raise ConfigEntryAuthFailed(
+                    f"Google-Autorisierung ungültig oder widerrufen ({err.status})"
+                ) from err
+            raise
 
     async def _async_update_data(self) -> BackupData:
         assert self.backend is not None
         try:
             stats = await self.backend.async_run_backup()
+        except ConfigEntryAuthFailed:
+            raise
+        except ClientResponseError as err:
+            if err.status in AUTH_FAILURE_STATUS_CODES:
+                raise ConfigEntryAuthFailed(
+                    f"Google-Autorisierung ungültig oder widerrufen ({err.status}) - "
+                    "bitte Integration neu autorisieren."
+                ) from err
+            raise UpdateFailed(f"Backup-Lauf fehlgeschlagen: {err}") from err
         except Exception as err:  # noqa: BLE001
             raise UpdateFailed(f"Backup-Lauf fehlgeschlagen: {err}") from err
 
