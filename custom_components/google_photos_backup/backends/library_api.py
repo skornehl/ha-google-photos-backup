@@ -85,6 +85,18 @@ class LibraryApiBackend(BackupBackend):
         return payload["pickerUri"]
 
     async def async_run_backup(self) -> BackupStats:
+        """Downloads run strictly sequentially, one item at a time.
+
+        Deliberate, not an oversight (see issue #20): concurrency here
+        would need to share a single bandwidth budget across workers to
+        keep the bandwidth_limit_kbps option meaningful (throttle.py's
+        pacer is per-download), and would multiply the request rate
+        against an API whose rate limits aren't documented in a way we
+        can safely tune against. Sequential is slower for very large
+        picker selections but predictable, and it keeps the throttle
+        semantics honest. Revisit with an explicit semaphore + shared
+        pacer if that ever becomes the actual bottleneck.
+        """
         stats = BackupStats()
         await self._finish_pending_picker_session(stats)
         await self._sync_app_created_items(stats)
