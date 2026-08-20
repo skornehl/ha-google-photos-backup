@@ -275,7 +275,7 @@ class GooglePhotosBackupFlowHandler(
     @config_entries.callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
-    ) -> "GooglePhotosBackupOptionsFlow":
+    ) -> GooglePhotosBackupOptionsFlow:
         return GooglePhotosBackupOptionsFlow()
 
 
