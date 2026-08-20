@@ -44,6 +44,7 @@ from ..const import (
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
     LIBRARY_API_BASE,
+    OAUTH2_SCOPES,
     PICKER_API_BASE,
 )
 from .base import BackupBackend, BackupStats
@@ -60,6 +61,8 @@ _LOGGER = logging.getLogger(__name__)
 
 class LibraryApiBackend(BackupBackend):
     """OAuth2-based backend combining the Library API and Picker API."""
+
+    oauth_scopes = OAUTH2_SCOPES
 
     def __init__(
         self,

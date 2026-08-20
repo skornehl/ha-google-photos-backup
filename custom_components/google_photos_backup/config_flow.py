@@ -17,6 +17,7 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_entry_oauth2_flow, selector
 
+from .backends import scopes_for_backend
 from .const import (
     BACKEND_LIBRARY_API,
     BACKEND_RCLONE,
@@ -49,7 +50,6 @@ from .const import (
     DOMAIN,
     MIN_SYNC_INTERVAL_MINUTES,
     OAUTH2_SCOPES,
-    OAUTH2_SCOPES_DRIVE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -143,11 +143,15 @@ class GooglePhotosBackupFlowHandler(
 
     @property
     def extra_authorize_data(self) -> dict[str, Any]:
-        # Only takeout's Drive-sync opt-in requests the Drive scope;
-        # everything else (library_api, and takeout's own reauth if that
-        # ever runs before CONF_BACKEND is set) keeps requesting the Photos
-        # scopes, same as before this property became backend-aware.
-        scopes = OAUTH2_SCOPES_DRIVE if self._data.get(CONF_BACKEND) == BACKEND_TAKEOUT else OAUTH2_SCOPES
+        # Which scopes to request is the backend's own business - each
+        # backend class declares them via BackupBackend.oauth_scopes, so
+        # adding an OAuth-using backend doesn't mean editing an if/elif
+        # chain here. Falls back to the Photos scopes when the backend
+        # isn't known yet (or doesn't declare any): the OAuth steps are
+        # only ever reached from a branch that has already set
+        # CONF_BACKEND, so this is a belt-and-braces default rather than
+        # a real code path.
+        scopes = scopes_for_backend(self._data.get(CONF_BACKEND)) or OAUTH2_SCOPES
         return {"scope": " ".join(scopes), "access_type": "offline", "prompt": "consent"}
 
     # -- step 1: backend selection -------------------------------------------
