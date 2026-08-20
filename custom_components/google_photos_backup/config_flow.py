@@ -189,9 +189,7 @@ class GooglePhotosBackupFlowHandler(
     ) -> FlowResult:
         if user_input is not None:
             self._data.update(user_input)
-            return self.async_create_entry(
-                title="Google Photos Backup (Picker/Library API)", data=self._data
-            )
+            return await self._async_finalize_entry("Google Photos Backup (Picker/Library API)")
         return self.async_show_form(step_id="library_api_options", data_schema=_common_schema())
 
     # -- rclone ---------------------------------------------------------------
@@ -202,7 +200,7 @@ class GooglePhotosBackupFlowHandler(
         errors: dict[str, str] = {}
         if user_input is not None:
             self._data.update(user_input)
-            return self.async_create_entry(title="Google Photos Backup (rclone)", data=self._data)
+            return await self._async_finalize_entry("Google Photos Backup (rclone)")
 
         schema = _common_schema().extend(
             {
@@ -239,7 +237,7 @@ class GooglePhotosBackupFlowHandler(
         """Plain-takeout path: no Drive sync, so no OAuth needed."""
         if user_input is not None:
             self._data.update(user_input)
-            return self.async_create_entry(title="Google Photos Backup (Takeout)", data=self._data)
+            return await self._async_finalize_entry("Google Photos Backup (Takeout)")
         return self.async_show_form(
             step_id="takeout", data_schema=_takeout_schema(drive_enabled=False)
         )
@@ -250,12 +248,28 @@ class GooglePhotosBackupFlowHandler(
         """Takeout-with-Drive-sync path: reached after OAuth succeeds."""
         if user_input is not None:
             self._data.update(user_input)
-            return self.async_create_entry(
-                title="Google Photos Backup (Takeout + Drive sync)", data=self._data
-            )
+            return await self._async_finalize_entry("Google Photos Backup (Takeout + Drive sync)")
         return self.async_show_form(
             step_id="takeout_drive_options", data_schema=_takeout_schema(drive_enabled=True)
         )
+
+    async def _async_finalize_entry(self, title: str) -> FlowResult:
+        """Guard against configuring the same backend + target directory
+        twice (see issue #4) before actually creating the entry - called
+        from every async_create_entry() call site above.
+
+        There's no cheap, scope-free way to get a stable Google-account ID
+        here (that would need an extra API call / the openid scope we
+        don't otherwise need), so `target_dir` is what we dedupe on: two
+        entries writing into the same local directory is the actually
+        harmful case (concurrent, uncoordinated writers), not "same Google
+        account twice" (a user may legitimately want two entries against
+        the same account with different targets/backends).
+        """
+        unique_id = f"{self._data.get(CONF_BACKEND)}:{self._data.get(CONF_TARGET_DIR)}"
+        await self.async_set_unique_id(unique_id)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=title, data=self._data)
 
     @staticmethod
     @config_entries.callback
