@@ -319,3 +319,12 @@ JSON validity, `strings.json`/translations key-sync check,
 [hassfest](https://developers.home-assistant.io/docs/creating_integration_manifest/#hassfest)
 (the official HA integration validator), `ruff` lint, and the pytest suite
 against Python 3.12 and 3.13.
+
+### Releasing
+
+HACS' update detection relies on `custom_components/google_photos_backup/
+manifest.json`'s `"version"` field (and/or a git tag) changing - bump it
+(SemVer) as part of any PR with a user-visible change, or in a dedicated
+version-bump PR/commit before tagging a GitHub release. CI warns (doesn't
+block) if a PR touches `custom_components/` without touching
+`manifest.json`.

@@ -10,9 +10,8 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
+from .backends.library_api import LibraryApiBackend
 from .const import (
-    BACKEND_LIBRARY_API,
-    CONF_BACKEND,
     DOMAIN,
     PLATFORMS,
     SERVICE_BACKUP_NOW,
@@ -46,6 +45,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    coordinator: GooglePhotosBackupCoordinator | None = hass.data.get(DOMAIN, {}).get(
+        entry.entry_id
+    )
+    if coordinator is not None and coordinator.backend is not None:
+        # Stop anything the backend might have in flight (e.g. rclone's
+        # subprocess) before tearing down the entry, so unload/reload
+        # never leaves it running detached from HA - see issue #6.
+        await coordinator.backend.async_terminate()
+
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
@@ -70,11 +78,18 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _handle_start_picker_session(call: ServiceCall) -> None:
         coordinator = _get_coordinator(hass, call.data["config_entry_id"])
-        if coordinator.entry.data.get(CONF_BACKEND) != BACKEND_LIBRARY_API:
+        # isinstance rather than comparing entry.data[CONF_BACKEND] to a
+        # string: async_start_picker_session() only exists on this one
+        # backend class, so checking the class itself is both the honest
+        # precondition and something the type checker can narrow on (the
+        # string comparison needed a `# type: ignore[union-attr]` to
+        # silence exactly the check that would have caught a mismatch).
+        backend = coordinator.backend
+        if not isinstance(backend, LibraryApiBackend):
             raise HomeAssistantError(
                 "start_picker_session ist nur für das library_api-Backend verfügbar"
             )
-        picker_uri = await coordinator.backend.async_start_picker_session()  # type: ignore[union-attr]
+        picker_uri = await backend.async_start_picker_session()
         persistent_notification.async_create(
             hass,
             f"Öffne diesen Link und wähle die zu sichernden Fotos aus:\n\n{picker_uri}",

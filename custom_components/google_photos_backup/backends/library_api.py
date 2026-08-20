@@ -31,7 +31,10 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
 
 from ..const import (
@@ -41,10 +44,12 @@ from ..const import (
     CONF_PICKER_SESSION_URI,
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
+    DOWNLOAD_TIMEOUT,
     LIBRARY_API_BASE,
+    OAUTH2_SCOPES,
     PICKER_API_BASE,
 )
-from .base import BackupBackend, BackupStats
+from .base import BackupBackend, BackupStats, SyncStateStore
 from .fsutil import dest_dir_for_date, ensure_target_dir, unique_destination
 from .throttle import throttled_read
 
@@ -54,11 +59,13 @@ _LOGGER = logging.getLogger(__name__)
 class LibraryApiBackend(BackupBackend):
     """OAuth2-based backend combining the Library API and Picker API."""
 
+    oauth_scopes = OAUTH2_SCOPES
+
     def __init__(
         self,
-        hass,
-        entry,
-        state,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        state: SyncStateStore,
         oauth_session: config_entry_oauth2_flow.OAuth2Session,
     ) -> None:
         super().__init__(hass, entry, state)
@@ -85,6 +92,18 @@ class LibraryApiBackend(BackupBackend):
         return payload["pickerUri"]
 
     async def async_run_backup(self) -> BackupStats:
+        """Downloads run strictly sequentially, one item at a time.
+
+        Deliberate, not an oversight (see issue #20): concurrency here
+        would need to share a single bandwidth budget across workers to
+        keep the bandwidth_limit_kbps option meaningful (throttle.py's
+        pacer is per-download), and would multiply the request rate
+        against an API whose rate limits aren't documented in a way we
+        can safely tune against. Sequential is slower for very large
+        picker selections but predictable, and it keeps the throttle
+        semantics honest. Revisit with an explicit semaphore + shared
+        pacer if that ever becomes the actual bottleneck.
+        """
         stats = BackupStats()
         await self._finish_pending_picker_session(stats)
         await self._sync_app_created_items(stats)
@@ -97,6 +116,9 @@ class LibraryApiBackend(BackupBackend):
         if not session_id:
             return
 
+        # Purely local check, deliberately outside the try below: its
+        # entire point is to short-circuit a session we already know is
+        # dead *before* spending a network round-trip on it.
         if self._is_picker_session_expired():
             _LOGGER.info(
                 "Picker-Session %s laut gespeichertem expireTime abgelaufen - "
@@ -107,41 +129,64 @@ class LibraryApiBackend(BackupBackend):
             self._clear_picker_session()
             return
 
-        resp = await self._oauth.async_request(
-            "GET", f"{PICKER_API_BASE}/sessions/{session_id}"
-        )
-        if resp.status == 404:
-            _LOGGER.warning("Picker-Session %s nicht mehr gültig, verwerfe sie", session_id)
-            self._clear_picker_session()
-            return
-        resp.raise_for_status()
-        session = await resp.json()
-        if not session.get("mediaItemsSet"):
-            _LOGGER.debug("Picker-Session %s: Nutzer hat noch nicht abgeschlossen", session_id)
-            return
-
-        target_dir = self.entry.data[CONF_TARGET_DIR]
-        page_token: str | None = None
-        while True:
-            params = {"sessionId": session_id, "pageSize": 100}
-            if page_token:
-                params["pageToken"] = page_token
+        # Listing (session status + paginated mediaItems) is wrapped like
+        # _sync_app_created_items() below - a single transient error (429,
+        # 5xx, network blip) here must degrade to a logged error for this
+        # run, not abort the whole coordinator update the way an unguarded
+        # raise_for_status() would (individual item downloads already
+        # degrade gracefully via _download_picker_item()'s own try/except;
+        # this closes the same gap for the session-management calls around
+        # them).
+        try:
             resp = await self._oauth.async_request(
-                "GET", f"{PICKER_API_BASE}/mediaItems", params=params
+                "GET", f"{PICKER_API_BASE}/sessions/{session_id}"
             )
+            if resp.status == 404:
+                _LOGGER.warning("Picker-Session %s nicht mehr gültig, verwerfe sie", session_id)
+                self._clear_picker_session()
+                return
             resp.raise_for_status()
-            payload = await resp.json()
-            for item in payload.get("mediaItems", []):
-                await self._download_picker_item(item, target_dir, stats)
-            page_token = payload.get("nextPageToken")
-            if not page_token:
-                break
+            session = await resp.json()
+            if not session.get("mediaItemsSet"):
+                _LOGGER.debug("Picker-Session %s: Nutzer hat noch nicht abgeschlossen", session_id)
+                return
 
-        await self._oauth.async_request(
-            "DELETE", f"{PICKER_API_BASE}/sessions/{session_id}"
-        )
-        self._clear_picker_session()
-        _LOGGER.info("Picker-Session %s abgeschlossen und aufgeräumt", session_id)
+            target_dir = self.entry.data[CONF_TARGET_DIR]
+            page_token: str | None = None
+            while True:
+                params = {"sessionId": session_id, "pageSize": 100}
+                if page_token:
+                    params["pageToken"] = page_token
+                resp = await self._oauth.async_request(
+                    "GET", f"{PICKER_API_BASE}/mediaItems", params=params
+                )
+                resp.raise_for_status()
+                payload = await resp.json()
+                for item in payload.get("mediaItems", []):
+                    await self._download_picker_item(item, target_dir, stats)
+                page_token = payload.get("nextPageToken")
+                if not page_token:
+                    break
+        except Exception as err:  # noqa: BLE001
+            stats.errors.append(f"Picker-Session-Verarbeitung fehlgeschlagen: {err}")
+            return
+
+        try:
+            await self._oauth.async_request(
+                "DELETE", f"{PICKER_API_BASE}/sessions/{session_id}"
+            )
+            self._clear_picker_session()
+            _LOGGER.info("Picker-Session %s abgeschlossen und aufgeräumt", session_id)
+        except Exception as err:  # noqa: BLE001
+            # All items in this session are already downloaded and recorded
+            # in processed_ids by this point - losing the DELETE just means
+            # the next run re-checks the same session (Google may 404 it by
+            # then, or return the same mediaItemsSet again, which is
+            # harmless: every item gets skipped via processed_ids). Not
+            # worth treating as a bigger failure than it is.
+            stats.errors.append(
+                f"Picker-Session {session_id} konnte nicht aufgeräumt werden: {err}"
+            )
 
     def _clear_picker_session(self) -> None:
         self.state.set(CONF_PICKER_SESSION_ID, None)
@@ -167,8 +212,17 @@ class LibraryApiBackend(BackupBackend):
             return False
         return datetime.now(timezone.utc) >= expires_at
 
-    async def _download_picker_item(self, item: dict, target_dir: str, stats: BackupStats) -> None:
+    async def _download_picker_item(
+        self, item: dict[str, Any], target_dir: str, stats: BackupStats
+    ) -> None:
         item_id = item.get("id")
+        if not item_id:
+            # No id means we can't record it in processed_ids, so it would
+            # be re-downloaded on every single run forever. Skip loudly
+            # rather than silently accumulating duplicates.
+            stats.errors.append("Picker-Item ohne id in der Antwort - übersprungen")
+            return
+
         processed_ids: list[str] = self.state.get("processed_ids", [])
         if item_id in processed_ids:
             stats.files_skipped += 1
@@ -191,7 +245,9 @@ class LibraryApiBackend(BackupBackend):
 
         limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
         try:
-            resp = await self._oauth.async_request("GET", base_url + suffix)
+            resp = await self._oauth.async_request(
+                "GET", base_url + suffix, timeout=DOWNLOAD_TIMEOUT
+            )
             resp.raise_for_status()
             raw = await throttled_read(resp, limit_kbps)
         except Exception as err:  # noqa: BLE001 - surfaced to the user via sensor
@@ -201,9 +257,19 @@ class LibraryApiBackend(BackupBackend):
         def _write() -> int:
             dest_dir = dest_dir_for_date(target_dir, taken_at)
             dest = unique_destination(dest_dir, filename)
-            dest.write_bytes(raw)
-            ts = taken_at.timestamp()
-            os.utime(dest, (ts, ts))
+            # Write to a .part sibling and only rename onto the final name
+            # once fully written - a process kill mid-write can then never
+            # leave a truncated file sitting at the name the rest of the
+            # code treats as "this photo is done" (see issue #9).
+            tmp_path = dest.with_name(dest.name + ".part")
+            try:
+                tmp_path.write_bytes(raw)
+                ts = taken_at.timestamp()
+                os.utime(tmp_path, (ts, ts))
+                os.replace(tmp_path, dest)
+            except BaseException:
+                tmp_path.unlink(missing_ok=True)
+                raise
             return len(raw)
 
         size = await self.hass.async_add_executor_job(_write)
