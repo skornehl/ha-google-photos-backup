@@ -31,10 +31,8 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
 from homeassistant.helpers import config_entry_oauth2_flow
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from ..const import (
     CONF_BANDWIDTH_LIMIT_KBPS,
@@ -47,12 +45,7 @@ from ..const import (
     PICKER_API_BASE,
 )
 from .base import BackupBackend, BackupStats
-from .fsutil import (
-    dest_dir_for_date,
-    ensure_target_dir,
-    move_into_place,
-    unique_destination,
-)
+from .fsutil import dest_dir_for_date, ensure_target_dir, unique_destination
 from .throttle import throttled_read
 
 _LOGGER = logging.getLogger(__name__)
