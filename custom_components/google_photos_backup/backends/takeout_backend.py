@@ -362,7 +362,7 @@ class TakeoutBackend(BackupBackend):
             self._remember_drive_file(name, file_id)
 
     @staticmethod
-    def _local_file_matches_drive_size(dest: Path, drive_size: object) -> bool:
+    def _local_file_matches_drive_size(dest: Path, drive_size: str | int | None) -> bool:
         """Compare an existing local file's size against what Drive
         reported for it, to distinguish "fully downloaded, only the state
         write was missed" from "crashed mid-download, file is truncated".

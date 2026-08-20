@@ -80,6 +80,7 @@
     "abort": {
       "already_configured": "Diese Instanz ist bereits konfiguriert",
       "reauth_successful": "Erneute Autorisierung erfolgreich",
+      "reauth_entry_missing": "Die Instanz wurde während der erneuten Autorisierung entfernt - nichts zu aktualisieren.",
       "oauth_error": "Fehler beim Empfang der OAuth2-Token-Daten",
       "oauth_timeout": "Zeitüberschreitung beim Warten auf Autorisierung",
       "missing_configuration": "Die Integration ist nicht richtig konfiguriert (Application Credentials fehlen). Siehe README."
@@ -111,10 +112,18 @@
   },
   "entity": {
     "sensor": {
-      "last_sync": { "name": "Letzter Sync" },
-      "files_backed_up": { "name": "Gesicherte Dateien" },
-      "last_error": { "name": "Letzter Fehler" },
-      "free_space": { "name": "Freier Speicherplatz" }
+      "last_sync": {
+        "name": "Letzter Sync"
+      },
+      "files_backed_up": {
+        "name": "Gesicherte Dateien"
+      },
+      "last_error": {
+        "name": "Letzter Fehler"
+      },
+      "free_space": {
+        "name": "Freier Speicherplatz"
+      }
     }
   },
   "services": {

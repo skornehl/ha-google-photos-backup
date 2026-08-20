@@ -88,7 +88,13 @@ async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_p
     oauth.async_request = AsyncMock(side_effect=[list_resp, download_resp])
 
     entry = SimpleNamespace(data={}, options={})
+    # Not a bare MagicMock: _sync_drive_folder offloads its filesystem
+    # calls via async_add_executor_job, so this has to actually await and
+    # run them. Executing the callable for real (rather than returning a
+    # canned value) also keeps this test from caring how many executor
+    # round-trips the production code happens to make.
     hass = MagicMock()
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
 
     backend = TakeoutBackend(hass, entry, SyncStateStore({}), oauth_session=oauth)
     stats = BackupStats()
@@ -96,6 +102,8 @@ async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_p
     # Real (non-existent) path so dest.exists() -> False and the code
     # actually reaches the download call we want to inspect.
     await backend._sync_drive_folder(tmp_path, stats)
+
+    assert stats.errors == [], f"unerwartete Fehler: {stats.errors}"
 
     # First call is the files.list, second is the actual content download.
     _, download_kwargs = oauth.async_request.call_args_list[1]

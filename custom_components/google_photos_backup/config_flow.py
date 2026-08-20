@@ -210,6 +210,12 @@ class GooglePhotosBackupFlowHandler(
 
         if self.source == config_entries.SOURCE_REAUTH:
             existing_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+            if existing_entry is None:
+                # The entry was removed while the user was off completing
+                # the Google sign-in - nothing left to write the new token
+                # to, and dereferencing it here would raise AttributeError
+                # mid-flow.
+                return self.async_abort(reason="reauth_entry_missing")
             self.hass.config_entries.async_update_entry(existing_entry, data=self._data)
             await self.hass.config_entries.async_reload(existing_entry.entry_id)
             return self.async_abort(reason="reauth_successful")
