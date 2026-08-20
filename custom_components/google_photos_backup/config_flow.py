@@ -172,7 +172,30 @@ class GooglePhotosBackupFlowHandler(
         )
         return self.async_show_form(step_id="user", data_schema=schema)
 
-    # -- OAuth2 dispatch: library_api options, or takeout+Drive options ------
+    # -- reauth: token refresh failed (revoked/expired grant), see
+    # coordinator.py's ConfigEntryAuthFailed handling ------------------------
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+        # Called by HA when a previous async_setup_entry/coordinator update
+        # raised ConfigEntryAuthFailed for this entry. `entry_data` is the
+        # failing entry's existing `.data` - carry forward CONF_BACKEND (and
+        # CONF_TAKEOUT_DRIVE_SYNC, if set) so extra_authorize_data below
+        # requests the same scope as originally, then just re-run the normal
+        # OAuth dance; async_oauth_create_entry() detects the reauth source
+        # and updates the existing entry instead of creating a new one.
+        self._data[CONF_BACKEND] = entry_data.get(CONF_BACKEND)
+        self._data[CONF_TAKEOUT_DRIVE_SYNC] = entry_data.get(CONF_TAKEOUT_DRIVE_SYNC, False)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        if user_input is None:
+            return self.async_show_form(step_id="reauth_confirm")
+        return await self.async_step_pick_implementation()
+
+    # -- OAuth2 dispatch: library_api options, takeout+Drive options, or
+    # reauth completion -------------------------------------------------------
 
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> FlowResult:
         # Called by AbstractOAuth2FlowHandler once the OAuth dance succeeds.
@@ -180,6 +203,13 @@ class GooglePhotosBackupFlowHandler(
         # it and ask for the remaining fields before finalizing. Which
         # fields depends on which backend sent us through OAuth.
         self._data.update(data)
+
+        if self.source == config_entries.SOURCE_REAUTH:
+            existing_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+            self.hass.config_entries.async_update_entry(existing_entry, data=self._data)
+            await self.hass.config_entries.async_reload(existing_entry.entry_id)
+            return self.async_abort(reason="reauth_successful")
+
         if self._data.get(CONF_BACKEND) == BACKEND_TAKEOUT:
             return await self.async_step_takeout_drive_options()
         return await self.async_step_library_api_options()

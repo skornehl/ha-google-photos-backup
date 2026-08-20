@@ -11,6 +11,10 @@
       "pick_implementation": {
         "title": "Pick Google account"
       },
+      "reauth_confirm": {
+        "title": "Re-authenticate Google Photos Backup",
+        "description": "Google rejected the stored access grant for this instance (revoked, expired, or scope changed) - sign in again to keep backups running."
+      },
       "library_api_options": {
         "title": "Target directory & interval",
         "description": "Note: this backend can only see media uploaded by this integration itself, plus whatever you manually select via a Picker session (start_picker_session service). It does NOT automatically read your whole existing library.",
@@ -75,6 +79,7 @@
     },
     "abort": {
       "already_configured": "This instance is already configured",
+      "reauth_successful": "Re-authentication successful",
       "oauth_error": "Error receiving OAuth2 token data",
       "oauth_timeout": "Timed out waiting for authorization",
       "missing_configuration": "The integration is not configured correctly (Application Credentials missing). See README."
