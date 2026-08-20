@@ -82,6 +82,25 @@ to quickly back up recent photos on demand without waiting for the next
 3. Settings → Devices & Services → Add Integration → "Google Photos
    Backup" → choose backend.
 
+### Bandwidth limiting
+
+`library_api` and `rclone` both offer a **Bandwidth limit (KiB/s)** field
+during setup, and it can be changed afterwards via Settings → Devices &
+Services → Google Photos Backup → Configure - no need to re-run the whole
+setup. `0` (the default) means unlimited. Useful for a large initial
+backup so it doesn't saturate the rest of your connection for hours.
+
+- `library_api`: throttled in Python while streaming each photo/video
+  download.
+- `rclone`: passed straight through to rclone's own `--bwlimit` flag.
+
+`takeout` doesn't offer this option because it never talks to the network
+itself - it only reads archives you (or a separate sync step) already
+placed into `takeout_watch_dir`. If you need to throttle *that* transfer,
+limit it at the tool that downloads the archives into the watch
+directory (e.g. your rclone Drive remote, or your browser/download
+manager).
+
 ### Backend 1: library_api (Google Cloud OAuth)
 
 1. Create a project in the [Google Cloud Console](https://console.cloud.google.com/),

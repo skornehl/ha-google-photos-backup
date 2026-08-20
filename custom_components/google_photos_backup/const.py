@@ -19,6 +19,15 @@ CONF_SYNC_INTERVAL_MINUTES: Final = "sync_interval_minutes"
 DEFAULT_SYNC_INTERVAL_MINUTES: Final = 60
 MIN_SYNC_INTERVAL_MINUTES: Final = 5
 
+# --- Bandwidth throttling ------------------------------------------------------
+# Only meaningful for backends that transfer bytes themselves (library_api,
+# rclone). The takeout backend never talks to the network - it only reads
+# archives already sitting in takeout_watch_dir - so it doesn't offer this
+# option; see takeout_backend.py.
+CONF_BANDWIDTH_LIMIT_KBPS: Final = "bandwidth_limit_kbps"
+DEFAULT_BANDWIDTH_LIMIT_KBPS: Final = 0  # 0 = unlimited
+DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB, used by the throttled library_api downloader
+
 # --- library_api backend ------------------------------------------------------
 # Removed 2025-03-31 by Google: photoslibrary, photoslibrary.readonly,
 # photoslibrary.sharing. Only these three scopes still exist:

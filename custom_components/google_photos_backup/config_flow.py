@@ -21,6 +21,7 @@ from .const import (
     BACKEND_TAKEOUT,
     BACKENDS,
     CONF_BACKEND,
+    CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_RCLONE_BINARY,
     CONF_RCLONE_CONFIG_PATH,
     CONF_RCLONE_REMOTE_NAME,
@@ -29,6 +30,7 @@ from .const import (
     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
     CONF_TAKEOUT_WATCH_DIR,
     CONF_TARGET_DIR,
+    DEFAULT_BANDWIDTH_LIMIT_KBPS,
     DEFAULT_RCLONE_BINARY,
     DEFAULT_RCLONE_SOURCE_PATH,
     DEFAULT_SYNC_INTERVAL_MINUTES,
@@ -52,6 +54,19 @@ def _common_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SYNC_INTERVAL_MINUTES)),
         }
     )
+
+
+def _bandwidth_schema(defaults: dict[str, Any] | None = None) -> dict[Any, Any]:
+    """Bandwidth limit field, added to backends that transfer bytes
+    themselves (library_api, rclone). Not part of _common_schema() because
+    the takeout backend never does network I/O - see const.py."""
+    defaults = defaults or {}
+    return {
+        vol.Optional(
+            CONF_BANDWIDTH_LIMIT_KBPS,
+            default=defaults.get(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS),
+        ): vol.All(vol.Coerce(int), vol.Range(min=0))
+    }
 
 
 class GooglePhotosBackupFlowHandler(
@@ -120,7 +135,8 @@ class GooglePhotosBackupFlowHandler(
                 title="Google Photos Backup (Picker/Library API)", data=self._data
             )
         return self.async_show_form(
-            step_id="library_api_options", data_schema=_common_schema()
+            step_id="library_api_options",
+            data_schema=_common_schema().extend(_bandwidth_schema()),
         )
 
     # -- rclone ---------------------------------------------------------------
@@ -139,6 +155,7 @@ class GooglePhotosBackupFlowHandler(
                 vol.Optional(CONF_RCLONE_BINARY, default=DEFAULT_RCLONE_BINARY): str,
                 vol.Optional(CONF_RCLONE_CONFIG_PATH, default=""): str,
                 vol.Optional(CONF_RCLONE_SOURCE_PATH, default=DEFAULT_RCLONE_SOURCE_PATH): str,
+                **_bandwidth_schema(),
             }
         )
         return self.async_show_form(step_id="rclone", data_schema=schema, errors=errors)
@@ -172,7 +189,8 @@ class GooglePhotosBackupFlowHandler(
 
 
 class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
-    """Lets the user change the sync interval without re-running setup.
+    """Lets the user change the sync interval and bandwidth limit without
+    re-running setup.
 
     No custom __init__/self.config_entry assignment - current HA populates
     `self.config_entry` on the instance automatically; doing it manually is
@@ -185,15 +203,28 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.options.get(
+        current_interval = self.config_entry.options.get(
             CONF_SYNC_INTERVAL_MINUTES,
             self.config_entry.data.get(CONF_SYNC_INTERVAL_MINUTES, DEFAULT_SYNC_INTERVAL_MINUTES),
         )
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_SYNC_INTERVAL_MINUTES, default=current): vol.All(
-                    vol.Coerce(int), vol.Range(min=MIN_SYNC_INTERVAL_MINUTES)
+        schema_dict: dict[Any, Any] = {
+            vol.Required(CONF_SYNC_INTERVAL_MINUTES, default=current_interval): vol.All(
+                vol.Coerce(int), vol.Range(min=MIN_SYNC_INTERVAL_MINUTES)
+            )
+        }
+        # takeout never transfers bytes itself (see const.py) - no
+        # bandwidth field to offer for that backend.
+        if self.config_entry.data.get(CONF_BACKEND) != BACKEND_TAKEOUT:
+            schema_dict.update(
+                _bandwidth_schema(
+                    {
+                        CONF_BANDWIDTH_LIMIT_KBPS: self.config_entry.options.get(
+                            CONF_BANDWIDTH_LIMIT_KBPS,
+                            self.config_entry.data.get(
+                                CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS
+                            ),
+                        )
+                    }
                 )
-            }
-        )
-        return self.async_show_form(step_id="init", data_schema=schema)
+            )
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))

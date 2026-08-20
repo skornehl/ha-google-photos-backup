@@ -37,10 +37,12 @@ from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from ..const import (
+    CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_PICKER_SESSION_EXPIRES,
     CONF_PICKER_SESSION_ID,
     CONF_PICKER_SESSION_URI,
     CONF_TARGET_DIR,
+    DEFAULT_BANDWIDTH_LIMIT_KBPS,
     LIBRARY_API_BASE,
     PICKER_API_BASE,
 )
@@ -51,6 +53,7 @@ from .fsutil import (
     move_into_place,
     unique_destination,
 )
+from .throttle import throttled_read
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -164,10 +167,11 @@ class LibraryApiBackend(BackupBackend):
         except ValueError:
             taken_at = datetime.now(timezone.utc)
 
+        limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
         try:
             resp = await self._oauth.async_request("GET", base_url + suffix)
             resp.raise_for_status()
-            raw = await resp.read()
+            raw = await throttled_read(resp, limit_kbps)
         except Exception as err:  # noqa: BLE001 - surfaced to the user via sensor
             stats.errors.append(f"{filename}: Download fehlgeschlagen ({err})")
             return

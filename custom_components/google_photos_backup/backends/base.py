@@ -68,6 +68,12 @@ class BackupBackend(ABC):
         self.entry = entry
         self.state = state
 
+    def _option(self, key: str, default: Any = None) -> Any:
+        """Read a config value, preferring an options-flow override (set
+        after initial setup, e.g. via the "..." menu on the integration)
+        over the value collected during the original config flow."""
+        return self.entry.options.get(key, self.entry.data.get(key, default))
+
     @abstractmethod
     async def async_validate(self) -> None:
         """Raise homeassistant.exceptions.ConfigEntryNotReady / ValueError.

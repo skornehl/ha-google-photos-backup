@@ -16,7 +16,8 @@
         "description": "Note: this backend can only see media uploaded by this integration itself, plus whatever you manually select via a Picker session (start_picker_session service). It does NOT automatically read your whole existing library.",
         "data": {
           "target_dir": "Target directory (local mount)",
-          "sync_interval_minutes": "Sync interval (minutes)"
+          "sync_interval_minutes": "Sync interval (minutes)",
+          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)"
         }
       },
       "rclone": {
@@ -28,7 +29,8 @@
           "rclone_remote_name": "rclone remote name (from rclone.conf)",
           "rclone_binary": "rclone binary path/name",
           "rclone_config_path": "Path to rclone.conf (empty = default)",
-          "rclone_source_path": "Source path in remote (e.g. media/by-month)"
+          "rclone_source_path": "Source path in remote (e.g. media/by-month)",
+          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)"
         }
       },
       "takeout": {
@@ -59,7 +61,8 @@
       "init": {
         "title": "Google Photos Backup options",
         "data": {
-          "sync_interval_minutes": "Sync interval (minutes)"
+          "sync_interval_minutes": "Sync interval (minutes)",
+          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)"
         }
       }
     }

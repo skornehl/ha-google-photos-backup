@@ -20,11 +20,13 @@ import shutil
 from pathlib import Path
 
 from ..const import (
+    CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_RCLONE_BINARY,
     CONF_RCLONE_CONFIG_PATH,
     CONF_RCLONE_REMOTE_NAME,
     CONF_RCLONE_SOURCE_PATH,
     CONF_TARGET_DIR,
+    DEFAULT_BANDWIDTH_LIMIT_KBPS,
     DEFAULT_RCLONE_BINARY,
 )
 from .base import BackupBackend, BackupStats
@@ -78,6 +80,10 @@ class RcloneBackend(BackupBackend):
             "--stats=10s",
             "--stats-one-line",
         ]
+        limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
+        if limit_kbps > 0:
+            # rclone's `k` suffix is KiByte/s, matching our own KiB/s unit.
+            args += ["--bwlimit", f"{limit_kbps}k"]
 
         _LOGGER.debug("rclone Aufruf: %s", " ".join(args))
         proc = await asyncio.create_subprocess_exec(
