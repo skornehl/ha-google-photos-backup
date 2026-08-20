@@ -36,7 +36,7 @@ async def async_create_backend(
         return RcloneBackend(hass, entry, state)
 
     if backend_type == BACKEND_TAKEOUT:
-        oauth_session = None
+        oauth_session: config_entry_oauth2_flow.OAuth2Session | None = None
         if entry.data.get(CONF_TAKEOUT_DRIVE_SYNC):
             implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(
                 hass, entry

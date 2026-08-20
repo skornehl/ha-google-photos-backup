@@ -145,6 +145,13 @@ class LibraryApiBackend(BackupBackend):
         self, item: dict[str, Any], target_dir: str, stats: BackupStats
     ) -> None:
         item_id = item.get("id")
+        if not item_id:
+            # No id means we can't record it in processed_ids, so it would
+            # be re-downloaded on every single run forever. Skip loudly
+            # rather than silently accumulating duplicates.
+            stats.errors.append("Picker-Item ohne id in der Antwort - übersprungen")
+            return
+
         processed_ids: list[str] = self.state.get("processed_ids", [])
         if item_id in processed_ids:
             stats.files_skipped += 1

@@ -328,6 +328,13 @@ class TakeoutBackend(BackupBackend):
         after it has been successfully imported. Only called when
         CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC is on - see async_run_backup.
         """
+        if self._oauth is None:
+            # Only reachable if an archive was recorded in
+            # drive_file_id_by_name while Drive sync was on and the entry
+            # was later reconfigured without it. Nothing to clean up
+            # against, and definitely not worth raising over.
+            return
+
         permanently = self._option(
             CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY, DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY
         )
