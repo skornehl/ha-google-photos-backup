@@ -1,0 +1,106 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Google Photos Backup einrichten",
+        "description": "Wähle das Backend, mit dem Fotos/Videos gesichert werden sollen. Siehe README für die Unterschiede - kurz gesagt: 'takeout' ist derzeit der einzige Weg, eine bestehende Bibliothek vollständig zu sichern.",
+        "data": {
+          "backend": "Backend"
+        }
+      },
+      "pick_implementation": {
+        "title": "Google-Konto auswählen"
+      },
+      "library_api_options": {
+        "title": "Zielverzeichnis & Intervall",
+        "description": "Achtung: Dieses Backend sieht per API nur Medien, die von dieser Integration selbst hochgeladen wurden, plus was du über eine Picker-Session manuell auswählst (Service start_picker_session). Es liest NICHT automatisch deine gesamte bestehende Bibliothek.",
+        "data": {
+          "target_dir": "Zielverzeichnis (lokal gemountet)",
+          "sync_interval_minutes": "Sync-Intervall (Minuten)"
+        }
+      },
+      "rclone": {
+        "title": "rclone-Backend konfigurieren",
+        "description": "Achtung: Seit März 2025 kann auch rclone über das googlephotos-Backend nur Dateien herunterladen, die es selbst hochgeladen hat. Für eine bestehende Bibliothek ist meist das Takeout-Backend die bessere Wahl.",
+        "data": {
+          "target_dir": "Zielverzeichnis (lokal gemountet)",
+          "sync_interval_minutes": "Sync-Intervall (Minuten)",
+          "rclone_remote_name": "rclone Remote-Name (aus rclone.conf)",
+          "rclone_binary": "Pfad/Name des rclone-Binaries",
+          "rclone_config_path": "Pfad zu rclone.conf (leer = Standard)",
+          "rclone_source_path": "Quellpfad im Remote (z. B. media/by-month)"
+        }
+      },
+      "takeout": {
+        "title": "Takeout-Backend konfigurieren",
+        "description": "Lege Google-Takeout-Exportarchive (.zip/.tgz) in das Watch-Verzeichnis - die Integration entpackt, ordnet nach Aufnahmedatum aus dem JSON-Sidecar ein und erkennt Duplikate über Datei-Hashes.",
+        "data": {
+          "target_dir": "Zielverzeichnis (lokal gemountet)",
+          "sync_interval_minutes": "Sync-Intervall (Minuten)",
+          "takeout_watch_dir": "Watch-Verzeichnis für Takeout-Archive",
+          "takeout_delete_after_import": "Archiv nach erfolgreichem Import löschen"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung fehlgeschlagen",
+      "invalid_auth": "Ungültige Anmeldedaten",
+      "unknown": "Unerwarteter Fehler"
+    },
+    "abort": {
+      "already_configured": "Diese Instanz ist bereits konfiguriert",
+      "oauth_error": "Fehler beim Empfang der OAuth2-Token-Daten",
+      "oauth_timeout": "Zeitüberschreitung beim Warten auf Autorisierung",
+      "missing_configuration": "Die Integration ist nicht richtig konfiguriert (Application Credentials fehlen). Siehe README."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Google Photos Backup Optionen",
+        "data": {
+          "sync_interval_minutes": "Sync-Intervall (Minuten)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "backend": {
+      "options": {
+        "library_api": "Library/Picker API (nur manuelle Auswahl, kein Voll-Backup)",
+        "rclone": "rclone googlephotos-Backend",
+        "takeout": "Google Takeout Archiv-Import (empfohlen für Voll-Backup)"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_sync": { "name": "Letzter Sync" },
+      "files_backed_up": { "name": "Gesicherte Dateien" },
+      "last_error": { "name": "Letzter Fehler" },
+      "free_space": { "name": "Freier Speicherplatz" }
+    }
+  },
+  "services": {
+    "backup_now": {
+      "name": "Backup jetzt ausführen",
+      "description": "Startet sofort einen Backup-Lauf, unabhängig vom Zeitintervall.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config Entry",
+          "description": "Die zu synchronisierende Google Photos Backup Instanz."
+        }
+      }
+    },
+    "start_picker_session": {
+      "name": "Foto-Auswahl starten (Picker)",
+      "description": "Nur library_api-Backend: erzeugt eine Picker-Session und benachrichtigt mit dem Auswahl-Link.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config Entry",
+          "description": "Die Google Photos Backup Instanz mit Backend library_api."
+        }
+      }
+    }
+  }
+}
