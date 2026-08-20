@@ -12,15 +12,15 @@ from unittest.mock import MagicMock
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.google_photos_backup.diagnostics import (
-    async_get_config_entry_diagnostics,
-)
 from custom_components.google_photos_backup.const import (
     BACKEND_TAKEOUT,
     CONF_BACKEND,
     CONF_TAKEOUT_DOWNLOAD_LINKS,
     CONF_TARGET_DIR,
     DOMAIN,
+)
+from custom_components.google_photos_backup.diagnostics import (
+    async_get_config_entry_diagnostics,
 )
 
 _ACCESS_TOKEN = "ya29.SECRET-ACCESS-TOKEN"
