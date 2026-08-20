@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Final
 
+from aiohttp import ClientTimeout
+
 DOMAIN: Final = "google_photos_backup"
 
 # --- Backend selection -----------------------------------------------------
@@ -27,6 +29,22 @@ CONF_BANDWIDTH_LIMIT_KBPS: Final = "bandwidth_limit_kbps"
 DEFAULT_BANDWIDTH_LIMIT_KBPS: Final = 0  # 0 = unlimited
 DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB, used by throttled in-memory reads
 DRIVE_DOWNLOAD_FLUSH_SIZE: Final = 8 * 1024 * 1024  # buffered writes for large archives
+
+# Explicit per-request timeout for the actual byte-content downloads
+# (library_api items, Drive archive downloads, download-link fetches) -
+# NOT applied to small JSON/listing calls, which are fine with whatever
+# default the underlying aiohttp session already has.
+#
+# total=None deliberately leaves the *overall* duration unbounded: with a
+# low bandwidth_limit_kbps, a single large archive can legitimately take
+# many hours, and a finite `total` here would silently defeat that
+# feature by aborting the download partway through every time. sock_read
+# instead catches a genuinely stalled connection (no bytes arriving at
+# all for this long) - it does not fire because of our own deliberate
+# pacing sleeps between chunk reads (those don't block a socket read;
+# the server keeps sending into aiohttp's buffer in the background
+# regardless of when we choose to consume it).
+DOWNLOAD_TIMEOUT: Final = ClientTimeout(total=None, sock_connect=30, sock_read=300)
 
 # --- library_api backend ------------------------------------------------------
 # Removed 2025-03-31 by Google: photoslibrary, photoslibrary.readonly,
@@ -67,6 +85,12 @@ CONF_RCLONE_CONFIG_PATH: Final = "rclone_config_path"
 CONF_RCLONE_REMOTE_NAME: Final = "rclone_remote_name"
 CONF_RCLONE_SOURCE_PATH: Final = "rclone_source_path"
 DEFAULT_RCLONE_SOURCE_PATH: Final = "media/by-month"
+# Deliberately generous rather than short: with a low bandwidth_limit_kbps
+# (see throttle.py) a single large, legitimate sync can take many hours -
+# this is only meant to catch a genuinely hung rclone process (stuck auth
+# prompt, dead connection that never errors out), not to cap normal
+# large/slow transfers.
+RCLONE_TIMEOUT_SECONDS: Final = 24 * 60 * 60
 
 # --- takeout backend -------------------------------------------------------
 CONF_TAKEOUT_WATCH_DIR: Final = "takeout_watch_dir"

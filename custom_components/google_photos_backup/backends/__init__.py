@@ -17,7 +17,34 @@ from .library_api import LibraryApiBackend
 from .rclone_backend import RcloneBackend
 from .takeout_backend import TakeoutBackend
 
-__all__ = ["BackupBackend", "BackupStats", "SyncStateStore", "async_create_backend"]
+__all__ = [
+    "BackupBackend",
+    "BackupStats",
+    "SyncStateStore",
+    "async_create_backend",
+    "scopes_for_backend",
+]
+
+BACKEND_CLASSES: dict[str, type[BackupBackend]] = {
+    BACKEND_LIBRARY_API: LibraryApiBackend,
+    BACKEND_RCLONE: RcloneBackend,
+    BACKEND_TAKEOUT: TakeoutBackend,
+}
+
+
+def scopes_for_backend(backend_type: str | None) -> list[str] | None:
+    """OAuth2 scopes the given backend needs, or None if it needs none
+    (or the backend type isn't known yet - the config flow asks before
+    CONF_BACKEND is necessarily set).
+
+    Lives here rather than as an if/elif chain in config_flow so adding
+    an OAuth-using backend means declaring `oauth_scopes` on that one
+    class and nothing else - see BackupBackend.oauth_scopes.
+    """
+    backend_class = BACKEND_CLASSES.get(backend_type or "")
+    if backend_class is None:
+        return None
+    return backend_class.oauth_scopes
 
 
 async def async_create_backend(
@@ -36,12 +63,15 @@ async def async_create_backend(
         return RcloneBackend(hass, entry, state)
 
     if backend_type == BACKEND_TAKEOUT:
-        oauth_session = None
+        # Distinct name from the library_api branch above: that one binds
+        # a non-Optional OAuth2Session, and Python doesn't allow
+        # re-annotating an already-bound name in the same scope.
+        takeout_oauth: config_entry_oauth2_flow.OAuth2Session | None = None
         if entry.data.get(CONF_TAKEOUT_DRIVE_SYNC):
             implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(
                 hass, entry
             )
-            oauth_session = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
-        return TakeoutBackend(hass, entry, state, oauth_session=oauth_session)
+            takeout_oauth = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
+        return TakeoutBackend(hass, entry, state, oauth_session=takeout_oauth)
 
     raise ValueError(f"Unbekanntes Backend: {backend_type}")

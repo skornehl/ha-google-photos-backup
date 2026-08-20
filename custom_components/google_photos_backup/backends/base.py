@@ -1,6 +1,7 @@
 """Shared interface every backup backend implements."""
 from __future__ import annotations
 
+import builtins
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,8 +47,11 @@ class SyncStateStore:
         self.data[key] = value
 
     @property
-    def processed_hashes(self) -> set[str]:
-        return set(self.data.setdefault("processed_hashes", []))
+    def processed_hashes(self) -> builtins.set[str]:
+        # builtins.set, not set: this class defines a method named `set`,
+        # which shadows the builtin inside the class body - a bare
+        # `set[str]` annotation here resolves to SyncStateStore.set.
+        return builtins.set(self.data.setdefault("processed_hashes", []))
 
     def add_processed_hash(self, digest: str) -> None:
         hashes: list[str] = self.data.setdefault("processed_hashes", [])
@@ -57,6 +61,14 @@ class SyncStateStore:
 
 class BackupBackend(ABC):
     """Common interface for library_api / rclone / takeout backends."""
+
+    #: OAuth2 scopes this backend needs, or None if it doesn't use OAuth
+    #: at all. Declared here (rather than as an `if backend == ...` chain
+    #: inside config_flow's extra_authorize_data) so a new OAuth-using
+    #: backend only has to state its own scopes on its own class - see
+    #: config_flow.GooglePhotosBackupFlowHandler.extra_authorize_data,
+    #: which reads this via `scopes_for_backend()` below.
+    oauth_scopes: list[str] | None = None
 
     def __init__(
         self,
@@ -87,3 +99,9 @@ class BackupBackend(ABC):
     @abstractmethod
     async def async_run_backup(self) -> BackupStats:
         """Perform one backup pass and return stats for the sensors."""
+
+    async def async_terminate(self) -> None:
+        """Stop whatever this backend might currently have in flight
+        (e.g. a subprocess) - called on unload/reload so nothing is left
+        running detached from HA. No-op by default; only RcloneBackend
+        currently has something to actually terminate."""
