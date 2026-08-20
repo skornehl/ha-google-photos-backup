@@ -350,6 +350,7 @@ class TakeoutBackend(BackupBackend):
     def _import_archive(self, archive: Path, target_dir: str, stats: BackupStats) -> None:
         with tempfile.TemporaryDirectory(prefix="gpb_takeout_") as tmp:
             tmp_path = Path(tmp)
+            self._check_free_space(archive, tmp_path)
             self._extract(archive, tmp_path)
             media_files = [
                 p
@@ -358,6 +359,40 @@ class TakeoutBackend(BackupBackend):
             ]
             for media_file in media_files:
                 self._import_media_file(media_file, target_dir, stats)
+
+    @staticmethod
+    def _check_free_space(archive: Path, extract_dir: Path) -> None:
+        """Fail fast with a clear message if the extraction target is
+        obviously too small for this archive.
+
+        Without this the extraction still fails safely (the
+        TemporaryDirectory context manager cleans up, and the archive
+        isn't marked processed, so it's retried next run) - but only
+        with a bare OSError: [Errno 28] surfaced on the last_error
+        sensor, which reads like a bug rather than "your disk is full".
+
+        Uses the compressed archive size as the estimate, times a
+        modest safety factor. Takeout archives are overwhelmingly
+        already-compressed JPEG/MP4 payloads, so uncompressed size is
+        close to compressed size - deliberately not trying to read the
+        real uncompressed size from the archive headers, which would
+        mean opening every archive twice. This is a cheap sanity check
+        for the obvious case, not a guarantee.
+        """
+        try:
+            archive_size = archive.stat().st_size
+            free = shutil.disk_usage(extract_dir).free
+        except OSError:
+            return  # Can't tell - let the extraction itself decide.
+
+        required = int(archive_size * 1.2)
+        if free < required:
+            raise ValueError(
+                f"Zu wenig freier Speicherplatz zum Entpacken: {archive.name} "
+                f"benötigt ca. {required // (1024 * 1024)} MiB, verfügbar sind nur "
+                f"{free // (1024 * 1024)} MiB unter {extract_dir}. Archiv bleibt "
+                "liegen und wird beim nächsten Lauf erneut versucht."
+            )
 
     @staticmethod
     def _extract(archive: Path, dest: Path) -> None:
