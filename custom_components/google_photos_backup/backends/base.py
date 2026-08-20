@@ -62,6 +62,14 @@ class SyncStateStore:
 class BackupBackend(ABC):
     """Common interface for library_api / rclone / takeout backends."""
 
+    #: OAuth2 scopes this backend needs, or None if it doesn't use OAuth
+    #: at all. Declared here (rather than as an `if backend == ...` chain
+    #: inside config_flow's extra_authorize_data) so a new OAuth-using
+    #: backend only has to state its own scopes on its own class - see
+    #: config_flow.GooglePhotosBackupFlowHandler.extra_authorize_data,
+    #: which reads this via `scopes_for_backend()` below.
+    oauth_scopes: list[str] | None = None
+
     def __init__(
         self,
         hass: HomeAssistant,

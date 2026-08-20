@@ -75,6 +75,7 @@ from ..const import (
     DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     DRIVE_API_BASE,
+    OAUTH2_SCOPES_DRIVE,
     TAKEOUT_ARCHIVE_SUFFIXES,
 )
 from .base import BackupBackend, BackupStats, SyncStateStore
@@ -95,6 +96,12 @@ SIDECAR_PATTERNS = (
 
 
 class TakeoutBackend(BackupBackend):
+    # Only relevant when Drive sync is enabled - the plain-takeout path
+    # never goes through OAuth at all (see config_flow's
+    # async_step_takeout_drive_choice, which decides that before any
+    # authorize URL is built).
+    oauth_scopes = OAUTH2_SCOPES_DRIVE
+
     def __init__(
         self,
         hass: HomeAssistant,
