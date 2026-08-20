@@ -116,6 +116,19 @@ class LibraryApiBackend(BackupBackend):
         if not session_id:
             return
 
+        # Purely local check, deliberately outside the try below: its
+        # entire point is to short-circuit a session we already know is
+        # dead *before* spending a network round-trip on it.
+        if self._is_picker_session_expired():
+            _LOGGER.info(
+                "Picker-Session %s laut gespeichertem expireTime abgelaufen - "
+                "verwerfe sie ohne Google-Anfrage. Neue Auswahl über den "
+                "Service start_picker_session starten.",
+                session_id,
+            )
+            self._clear_picker_session()
+            return
+
         # Listing (session status + paginated mediaItems) is wrapped like
         # _sync_app_created_items() below - a single transient error (429,
         # 5xx, network blip) here must degrade to a logged error for this
@@ -179,6 +192,25 @@ class LibraryApiBackend(BackupBackend):
         self.state.set(CONF_PICKER_SESSION_ID, None)
         self.state.set(CONF_PICKER_SESSION_URI, None)
         self.state.set(CONF_PICKER_SESSION_EXPIRES, None)
+
+    def _is_picker_session_expired(self) -> bool:
+        """Client-side check against the expireTime Google returned when
+        the session was created (see async_start_picker_session) - lets
+        us skip a pointless API round-trip for a session we already know
+        is dead, instead of only finding out via a 404 from Google.
+        Conservative: any missing/unparseable value is treated as "not
+        expired" (falls through to the real status check against the
+        API), since a client-side clock/parsing issue shouldn't be able
+        to discard a session that's actually still fine.
+        """
+        expires_raw = self.state.get(CONF_PICKER_SESSION_EXPIRES)
+        if not expires_raw:
+            return False
+        try:
+            expires_at = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return False
+        return datetime.now(timezone.utc) >= expires_at
 
     async def _download_picker_item(
         self, item: dict[str, Any], target_dir: str, stats: BackupStats
