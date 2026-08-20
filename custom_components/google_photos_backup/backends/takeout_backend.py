@@ -363,11 +363,14 @@ class TakeoutBackend(BackupBackend):
     def _extract(archive: Path, dest: Path) -> None:
         name = archive.name.lower()
         if name.endswith(".zip"):
+            # zipfile has sanitized member paths (strips '..'/absolute
+            # components) in the stdlib for a long time - no extra check
+            # needed here, unlike tarfile below.
             with zipfile.ZipFile(archive) as zf:
                 zf.extractall(dest)
         elif name.endswith(".tgz") or name.endswith(".tar.gz"):
             with tarfile.open(archive, "r:gz") as tf:
-                tf.extractall(dest)
+                _safe_tar_extractall(tf, dest)
         else:
             raise ValueError(f"Unbekanntes Archivformat: {archive.name}")
 
@@ -435,3 +438,44 @@ def _common_prefix_len(a: str, b: str) -> int:
             break
         n += 1
     return n
+
+
+def _safe_tar_extractall(tf: tarfile.TarFile, dest: Path) -> None:
+    """Extract a tar archive, rejecting any member that would land outside
+    `dest` or that is a symlink/hardlink (path traversal / "Zip Slip" for
+    tar, CVE-2007-4559).
+
+    Unlike zipfile, tarfile.extractall() only defends against this by
+    default starting with Python 3.14 (PEP 706's `filter="data"` becoming
+    the default). Takeout .tgz archives can reach this code via the
+    download-links feature (arbitrary user-pasted URLs) or Drive sync, not
+    just manually placed files, so this can't rely on "Google is trusted"
+    - and Home Assistant can run on Python versions well before 3.14.
+
+    Strategy: prefer the real `filter="data"` where available (Python
+    3.12+, does more than just path-traversal checking - also drops
+    dangerous permission bits etc.); on older Python where `extractall()`
+    doesn't accept `filter` at all, fall back to a manual check that
+    covers at least the path-traversal and symlink/hardlink cases.
+    """
+    try:
+        tf.extractall(dest, filter="data")
+        return
+    except TypeError:
+        pass  # Python < 3.12: extractall() has no `filter` parameter yet.
+
+    dest_resolved = dest.resolve()
+    for member in tf.getmembers():
+        if member.issym() or member.islnk():
+            raise ValueError(
+                f"Takeout-Archiv enthält einen Symlink/Hardlink, wird abgelehnt: {member.name}"
+            )
+        member_path = (dest / member.name).resolve()
+        try:
+            member_path.relative_to(dest_resolved)
+        except ValueError:
+            raise ValueError(
+                "Takeout-Archiv enthält einen Pfad außerhalb des Zielverzeichnisses "
+                f"(möglicher Path-Traversal-Versuch): {member.name}"
+            ) from None
+    tf.extractall(dest)
