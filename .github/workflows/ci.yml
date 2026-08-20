@@ -45,6 +45,33 @@ jobs:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
 
+  # Informational only (warns, never fails the run) - manifest.json's
+  # version drifted for multiple functional PRs in a row before this was
+  # added (see issue #10), and HACS' update detection relies on it (or a
+  # git tag) changing. A warning here is a cheap nudge without blocking a
+  # maintainer who's deliberately batching several PRs into one release.
+  manifest-version-bump:
+    name: manifest.json version bump reminder
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Warn if custom_components/ changed without a version bump
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          BASE="origin/${{ github.base_ref }}"
+          if git diff --quiet "$BASE"...HEAD -- custom_components/; then
+            echo "No changes under custom_components/ - nothing to check."
+            exit 0
+          fi
+          if git diff --quiet "$BASE"...HEAD -- custom_components/google_photos_backup/manifest.json; then
+            echo "::warning::custom_components/ changed but manifest.json wasn't - HACS won't notice this release unless the version (or a git tag) changes. Bump it before merging to master, or batch this into a version-bump PR later."
+          else
+            echo "manifest.json was touched - OK."
+          fi
+
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
