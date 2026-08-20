@@ -14,3 +14,15 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["custom_components.google_photos_backup"]
+
+[tool.mypy]
+python_version = "3.12"
+# Not --strict yet (see the non-blocking `typecheck` CI job); these are
+# the checks the codebase should already satisfy, so a regression in
+# them shows up as new output rather than being lost in pre-existing
+# noise.
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+disallow_untyped_defs = false
+ignore_missing_imports = true

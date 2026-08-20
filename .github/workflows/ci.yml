@@ -56,6 +56,22 @@ jobs:
       - run: pip install ruff
       - run: ruff check custom_components tests
 
+  # Informational only for now (continue-on-error): the codebase isn't
+  # fully --strict clean yet, but running it surfaces regressions in the
+  # parts that are, and makes the remaining gap visible instead of
+  # invisible. Flip to blocking once the run is clean.
+  typecheck:
+    name: Type check (mypy, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install mypy homeassistant
+      - run: mypy custom_components/google_photos_backup
+
   pytest:
     name: pytest (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

@@ -54,8 +54,11 @@ import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -74,7 +77,7 @@ from ..const import (
     DRIVE_API_BASE,
     TAKEOUT_ARCHIVE_SUFFIXES,
 )
-from .base import BackupBackend, BackupStats
+from .base import BackupBackend, BackupStats, SyncStateStore
 from .fsutil import dest_dir_for_date, ensure_target_dir, sha256_file, unique_destination
 from .throttle import throttled_stream_to_file
 
@@ -94,9 +97,9 @@ SIDECAR_PATTERNS = (
 class TakeoutBackend(BackupBackend):
     def __init__(
         self,
-        hass,
-        entry,
-        state,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        state: SyncStateStore,
         oauth_session: config_entry_oauth2_flow.OAuth2Session | None = None,
     ) -> None:
         """`oauth_session` is only set when Drive sync is enabled - see
@@ -255,7 +258,7 @@ class TakeoutBackend(BackupBackend):
         if folder_id:
             query += f" and '{folder_id}' in parents"
 
-        files: list[dict] = []
+        files: list[dict[str, Any]] = []
         page_token: str | None = None
         while True:
             params = {
