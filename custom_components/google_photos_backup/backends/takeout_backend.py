@@ -308,10 +308,10 @@ class TakeoutBackend(BackupBackend):
             if not page_token:
                 break
 
-        for entry in files:
-            file_id = entry.get("id")
-            name = entry.get("name", "")
-            drive_size = entry.get("size")
+        for drive_file in files:
+            file_id = drive_file.get("id")
+            name = drive_file.get("name", "")
+            drive_size = drive_file.get("size")
             if not file_id or file_id in downloaded_ids:
                 continue
             if not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
