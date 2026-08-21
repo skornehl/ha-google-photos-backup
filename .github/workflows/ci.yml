@@ -45,6 +45,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
 
+  # Complements hassfest rather than duplicating it: hassfest validates
+  # the integration manifest, hacs/action validates the *repository* from
+  # HACS' point of view (layout, hacs.json, brands entry, topics). This
+  # integration ships exclusively as a HACS custom repository, so the
+  # delivery path deserves its own check.
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+
   # Informational only (warns, never fails the run) - manifest.json's
   # version drifted for multiple functional PRs in a row before this was
   # added (see issue #10), and HACS' update detection relies on it (or a

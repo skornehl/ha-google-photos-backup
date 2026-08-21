@@ -26,7 +26,7 @@ MIN_SYNC_INTERVAL_MINUTES: Final = 5
 # rclone passes it straight through as its own --bwlimit flag.
 CONF_BANDWIDTH_LIMIT_KBPS: Final = "bandwidth_limit_kbps"
 DEFAULT_BANDWIDTH_LIMIT_KBPS: Final = 0  # 0 = unlimited
-DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB, used by throttled in-memory reads
+DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB per network read while streaming
 DRIVE_DOWNLOAD_FLUSH_SIZE: Final = 8 * 1024 * 1024  # buffered writes for large archives
 
 # Explicit per-request timeout for the actual byte-content downloads
@@ -72,6 +72,14 @@ PICKER_API_BASE: Final = "https://photospicker.googleapis.com/v1"
 CONF_PICKER_SESSION_ID: Final = "picker_session_id"
 CONF_PICKER_SESSION_URI: Final = "picker_session_uri"
 CONF_PICKER_SESSION_EXPIRES: Final = "picker_session_expires"
+
+# Google Photos baseUrls expire roughly 60 minutes after they are issued.
+# Listing and downloading are interleaved per page (see library_api's
+# _finish_pending_picker_session), so run length isn't the problem - but a
+# single page is 100 items, and with a low bandwidth_limit_kbps those can
+# outlive their URLs. Re-request the page once it reaches this age. Set
+# well below 60 min so an in-flight download can't tip over the edge.
+BASEURL_MAX_AGE_SECONDS: Final = 45 * 60
 
 # --- rclone backend ------------------------------------------------------------
 CONF_RCLONE_BINARY: Final = "rclone_binary"
