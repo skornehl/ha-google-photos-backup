@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import builtins
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +19,11 @@ class BackupStats:
     files_skipped: int = 0
     bytes_downloaded: int = 0
     errors: list[str] = field(default_factory=list)
+
+    #: Set while a run is in progress, cleared when it finishes. Lets the
+    #: sensors say "still working" instead of looking stalled during a long
+    #: initial import (issue #21).
+    in_progress: bool = False
 
     def merge(self, other: BackupStats) -> None:
         self.files_downloaded += other.files_downloaded
@@ -75,10 +81,26 @@ class BackupBackend(ABC):
         hass: HomeAssistant,
         entry: ConfigEntry,
         state: SyncStateStore,
+        on_progress: Callable[[BackupStats], None] | None = None,
     ) -> None:
         self.hass = hass
         self.entry = entry
         self.state = state
+        #: Invoked by a backend to publish intermediate BackupStats while a
+        #: run is still going. The coordinator passes a callback that pushes
+        #: them to the sensors; when it's None (tests, direct use) reporting
+        #: is simply a no-op, so backends never have to check.
+        self._on_progress = on_progress
+
+    def _report_progress(self, stats: BackupStats) -> None:
+        """Publish intermediate stats. Cheap and safe to call often.
+
+        Deliberately one-directional: the backend hands data outward and
+        never reads coordinator state, so the dependency arrow this
+        architecture avoids stays pointing the right way.
+        """
+        if self._on_progress is not None:
+            self._on_progress(stats)
 
     def _option(self, key: str, default: Any = None) -> Any:
         """Read a config value, preferring an options-flow override (set

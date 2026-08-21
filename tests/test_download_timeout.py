@@ -31,7 +31,7 @@ def test_download_timeout_has_no_total_cap_but_bounds_stalls():
 async def test_library_api_item_download_passes_explicit_timeout(monkeypatch, tmp_path):
     import custom_components.google_photos_backup.backends.library_api as library_api_module
 
-    async def _fake_stream_to_file(resp, dest, hass, limit_kbps):
+    async def _fake_stream_to_file(resp, dest, hass, limit_kbps, pacer=None):
         dest.write_bytes(b"fake bytes")
         return len(b"fake bytes")
 
@@ -72,7 +72,7 @@ async def test_library_api_item_download_passes_explicit_timeout(monkeypatch, tm
 async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_path):
     import custom_components.google_photos_backup.backends.takeout_backend as takeout_module
 
-    async def _fake_throttled_stream_to_file(resp, dest, hass, limit_kbps):
+    async def _fake_throttled_stream_to_file(resp, dest, hass, limit_kbps, pacer=None):
         return 0
 
     monkeypatch.setattr(

@@ -55,7 +55,7 @@ def _make_backend(tmp_path, responses):
 async def test_page_is_not_refetched_when_urls_are_fresh(monkeypatch, tmp_path):
     downloaded = []
 
-    async def _fake_download(self, item, target_dir, stats):
+    async def _fake_download(self, item, target_dir, stats, pacer=None):
         downloaded.append(item["id"])
 
     monkeypatch.setattr(LibraryApiBackend, "_download_picker_item", _fake_download)
@@ -82,7 +82,7 @@ async def test_page_is_refetched_when_urls_age_out(monkeypatch, tmp_path):
 
     downloaded = []
 
-    async def _fake_download(self, item, target_dir, stats):
+    async def _fake_download(self, item, target_dir, stats, pacer=None):
         downloaded.append(item["mediaFile"]["baseUrl"])
 
     monkeypatch.setattr(LibraryApiBackend, "_download_picker_item", _fake_download)
@@ -121,7 +121,7 @@ async def test_shorter_page_after_refresh_does_not_index_out_of_range(monkeypatc
     changed mid-run), the loop must stop rather than IndexError."""
     monkeypatch.setattr(library_api_module, "BASEURL_MAX_AGE_SECONDS", 0)
 
-    async def _fake_download(self, item, target_dir, stats):
+    async def _fake_download(self, item, target_dir, stats, pacer=None):
         return None
 
     monkeypatch.setattr(LibraryApiBackend, "_download_picker_item", _fake_download)

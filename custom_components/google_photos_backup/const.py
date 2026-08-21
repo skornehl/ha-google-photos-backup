@@ -26,6 +26,16 @@ MIN_SYNC_INTERVAL_MINUTES: Final = 5
 # rclone passes it straight through as its own --bwlimit flag.
 CONF_BANDWIDTH_LIMIT_KBPS: Final = "bandwidth_limit_kbps"
 DEFAULT_BANDWIDTH_LIMIT_KBPS: Final = 0  # 0 = unlimited
+# Concurrent item downloads within one run (issue #20). Modest on purpose:
+# Google's per-user rate limits for the Picker API aren't documented in a
+# form we can tune against, and the win from more parallelism flattens out
+# quickly once the connection - not latency - is the bottleneck. The
+# bandwidth limit stays a *total* across workers via a shared
+# BandwidthPacer, so raising this never multiplies the configured cap.
+CONF_DOWNLOAD_CONCURRENCY: Final = "download_concurrency"
+DEFAULT_DOWNLOAD_CONCURRENCY: Final = 3
+MAX_DOWNLOAD_CONCURRENCY: Final = 8
+
 DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB per network read while streaming
 DRIVE_DOWNLOAD_FLUSH_SIZE: Final = 8 * 1024 * 1024  # buffered writes for large archives
 
@@ -160,6 +170,11 @@ SERVICE_START_PICKER_SESSION: Final = "start_picker_session"
 # Sensor keys - also used as translation_key / unique_id suffix, see
 # sensor.py. Kept as constants rather than repeated string literals so a
 # typo in one place can't silently desync from the other.
+# Sensors are updated while a run is still going (issue #21), but a big
+# import reports once per file and each report writes state for every
+# entity. Throttle so a backup run doesn't flood the recorder.
+PROGRESS_MIN_INTERVAL_SECONDS: Final = 5.0
+
 ATTR_LAST_SYNC: Final = "last_sync"
 ATTR_FILES_BACKED_UP: Final = "files_backed_up"
 ATTR_LAST_ERROR: Final = "last_error"

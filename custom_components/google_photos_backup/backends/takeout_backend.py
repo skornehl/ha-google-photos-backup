@@ -52,6 +52,7 @@ import shutil
 import tarfile
 import tempfile
 import zipfile
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -110,11 +111,12 @@ class TakeoutBackend(BackupBackend):
         entry: ConfigEntry,
         state: SyncStateStore,
         oauth_session: config_entry_oauth2_flow.OAuth2Session | None = None,
+        on_progress: Callable[[BackupStats], None] | None = None,
     ) -> None:
         """`oauth_session` is only set when Drive sync is enabled - see
         backends/__init__.py::async_create_backend. Download links never
         use it; they're plain, unauthenticated HTTPS fetches."""
-        super().__init__(hass, entry, state)
+        super().__init__(hass, entry, state, on_progress)
         self._oauth = oauth_session
 
     async def async_validate(self) -> None:
@@ -162,6 +164,7 @@ class TakeoutBackend(BackupBackend):
             processed_archives: list[str] = self.state.get("processed_archives", [])
             processed_archives.append(archive.name)
             self.state.set("processed_archives", processed_archives)
+            self._report_progress(stats)
 
             # Only clean up from Drive *after* a successful import, never
             # right after download - an archive that downloaded fine but

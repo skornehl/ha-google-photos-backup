@@ -13,13 +13,14 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .backends import BackupBackend, SyncStateStore, async_create_backend
+from .backends import BackupBackend, BackupStats, SyncStateStore, async_create_backend
 from .backends.fsutil import free_bytes
 from .const import (
     CONF_SYNC_INTERVAL_MINUTES,
     CONF_TARGET_DIR,
     DEFAULT_SYNC_INTERVAL_MINUTES,
     DOMAIN,
+    PROGRESS_MIN_INTERVAL_SECONDS,
     STORAGE_KEY_TEMPLATE,
     STORAGE_VERSION,
 )
@@ -46,6 +47,7 @@ class BackupData:
     last_run_files_skipped: int
     last_run_errors: list[str]
     free_space_bytes: int | None
+    in_progress: bool = False
 
 
 class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
@@ -82,6 +84,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._state_data: dict[str, Any] = {}
         self.backend: BackupBackend | None = None
         self._files_backed_up_total = 0
+        self._last_progress_at = 0.0
 
     @property
     def state_data(self) -> dict[str, Any]:
@@ -97,7 +100,9 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._state_data = await self._store.async_load() or {}
         self._files_backed_up_total = self._state_data.get("files_backed_up_total", 0)
         state = SyncStateStore(self._state_data)
-        self.backend = await async_create_backend(self.hass, self.entry, state)
+        self.backend = await async_create_backend(
+            self.hass, self.entry, state, on_progress=self._handle_progress
+        )
         try:
             await self.backend.async_validate()
         except ClientResponseError as err:
@@ -106,6 +111,34 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
                     f"Google-Autorisierung ungültig oder widerrufen ({err.status})"
                 ) from err
             raise
+
+    def _handle_progress(self, stats: BackupStats) -> None:
+        """Push intermediate stats from a running backup to the sensors.
+
+        Rate-limited: a large import calls this once per file, and every
+        call fans out to a state write per entity. PROGRESS_MIN_INTERVAL
+        keeps that from turning a backup run into a recorder flood.
+        """
+        now = self.hass.loop.time()
+        if now - self._last_progress_at < PROGRESS_MIN_INTERVAL_SECONDS:
+            return
+        self._last_progress_at = now
+        self.async_set_updated_data(self._build_data(stats, in_progress=True))
+
+    def _build_data(self, stats: BackupStats, *, in_progress: bool) -> BackupData:
+        """Snapshot for the sensors. free_space is only refreshed at the end
+        of a run - it needs a blocking stat() on a possibly network-mounted
+        path, which isn't worth doing on every progress tick."""
+        last_sync_raw = self._state_data.get("last_sync")
+        return BackupData(
+            last_sync=datetime.fromisoformat(last_sync_raw) if last_sync_raw else None,
+            files_backed_up_total=self._files_backed_up_total + stats.files_downloaded,
+            last_run_files_downloaded=stats.files_downloaded,
+            last_run_files_skipped=stats.files_skipped,
+            last_run_errors=stats.errors,
+            free_space_bytes=self.data.free_space_bytes if self.data else None,
+            in_progress=in_progress,
+        )
 
     async def _async_update_data(self) -> BackupData:
         assert self.backend is not None
@@ -144,4 +177,5 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             last_run_files_skipped=stats.files_skipped,
             last_run_errors=stats.errors,
             free_space_bytes=free,
+            in_progress=False,
         )
