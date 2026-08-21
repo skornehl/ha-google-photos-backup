@@ -328,3 +328,7 @@ manifest.json`'s `"version"` field (and/or a git tag) changing - bump it
 version-bump PR/commit before tagging a GitHub release. CI warns (doesn't
 block) if a PR touches `custom_components/` without touching
 `manifest.json`.
+
+## License
+
+[MIT](LICENSE)
