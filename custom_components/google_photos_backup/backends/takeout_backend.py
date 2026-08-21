@@ -512,7 +512,7 @@ class TakeoutBackend(BackupBackend):
                 ts = int(payload["photoTakenTime"]["timestamp"])
                 return datetime.fromtimestamp(ts, tz=timezone.utc)
             except (KeyError, ValueError, json.JSONDecodeError):
-                _LOGGER.debug("Sidecar %s ohne verwertbaren Zeitstempel", sidecar)
+                _LOGGER.debug("Sidecar %s has no usable timestamp", sidecar)
 
         # Fall back to whatever mtime the archive gave the extracted file
         # (usually the archive creation time, not the photo date - better

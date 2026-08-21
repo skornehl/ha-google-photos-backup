@@ -109,7 +109,7 @@ class RcloneBackend(BackupBackend):
             # rclone's `k` suffix is KiByte/s, matching our own KiB/s unit.
             args += ["--bwlimit", f"{limit_kbps}k"]
 
-        _LOGGER.debug("rclone Aufruf: %s", " ".join(args))
+        _LOGGER.debug("rclone invocation: %s", " ".join(args))
         self._proc = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,

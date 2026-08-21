@@ -87,7 +87,7 @@ class FilesBackedUpSensor(_BaseSensor):
             "last_run_skipped": self.coordinator.data.last_run_files_skipped,
             # Distinguishes "quiet because idle" from "quiet because a long
             # import is still running" (issue #21).
-            "lauf_aktiv": self.coordinator.data.in_progress,
+            "run_active": self.coordinator.data.in_progress,
         }
 
 

@@ -81,4 +81,4 @@ async def async_create_backend(
             hass, entry, state, oauth_session=takeout_oauth, on_progress=on_progress
         )
 
-    raise ValueError(f"Unbekanntes Backend: {backend_type}")
+    raise ValueError(f"Unknown backend: {backend_type}")
