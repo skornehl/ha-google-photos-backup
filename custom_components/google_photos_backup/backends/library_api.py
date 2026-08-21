@@ -43,19 +43,22 @@ from homeassistant.helpers import config_entry_oauth2_flow
 from ..const import (
     BASEURL_MAX_AGE_SECONDS,
     CONF_BANDWIDTH_LIMIT_KBPS,
+    CONF_DOWNLOAD_CONCURRENCY,
     CONF_PICKER_SESSION_EXPIRES,
     CONF_PICKER_SESSION_ID,
     CONF_PICKER_SESSION_URI,
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
+    DEFAULT_DOWNLOAD_CONCURRENCY,
     DOWNLOAD_TIMEOUT,
     LIBRARY_API_BASE,
+    MAX_DOWNLOAD_CONCURRENCY,
     OAUTH2_SCOPES,
     PICKER_API_BASE,
 )
 from .base import BackupBackend, BackupStats, SyncStateStore
 from .fsutil import dest_dir_for_date, ensure_target_dir, unique_destination
-from .throttle import throttled_stream_to_file
+from .throttle import BandwidthPacer, throttled_stream_to_file
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,6 +78,11 @@ class LibraryApiBackend(BackupBackend):
     ) -> None:
         super().__init__(hass, entry, state, on_progress)
         self._oauth = oauth_session
+        #: Destinations claimed by an in-flight download. See
+        #: fsutil.unique_destination() for why existence alone isn't
+        #: enough while downloads overlap.
+        self._reserved_destinations: set[Path] = set()
+        self._reserve_lock = asyncio.Lock()
 
     async def async_validate(self) -> None:
         target_dir = self.entry.data[CONF_TARGET_DIR]
@@ -158,6 +166,12 @@ class LibraryApiBackend(BackupBackend):
 
             target_dir = self.entry.data[CONF_TARGET_DIR]
             loop = asyncio.get_running_loop()
+            concurrency = self._download_concurrency()
+            sem = asyncio.Semaphore(concurrency)
+            limit_kbps = self._option(
+                CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS
+            )
+            pacer = BandwidthPacer(limit_kbps) if limit_kbps > 0 else None
             page_token: str | None = None
             while True:
                 params = {"sessionId": session_id, "pageSize": 100}
@@ -180,6 +194,12 @@ class LibraryApiBackend(BackupBackend):
                 # (same pageToken) once the URLs get close to expiry, then
                 # carry on at the same index: identical query, identical
                 # order, only the baseUrls are fresh.
+                # Downloads run concurrently within a page (issue #20),
+                # bounded by a semaphore and sharing one BandwidthPacer so
+                # bandwidth_limit_kbps stays a total rather than a
+                # per-worker allowance. Batched rather than one big gather
+                # so the baseUrl age check below still gets a chance to run
+                # between batches instead of after the whole page.
                 index = 0
                 while index < len(items):
                     if loop.time() - fetched_at > BASEURL_MAX_AGE_SECONDS:
@@ -200,8 +220,15 @@ class LibraryApiBackend(BackupBackend):
                             # Shorter page than before (user changed the
                             # selection mid-run?) - nothing left here.
                             break
-                    await self._download_picker_item(items[index], target_dir, stats)
-                    index += 1
+
+                    batch = items[index : index + concurrency]
+                    await asyncio.gather(
+                        *(
+                            self._download_with_limit(sem, item, target_dir, stats, pacer)
+                            for item in batch
+                        )
+                    )
+                    index += len(batch)
 
                 page_token = payload.get("nextPageToken")
                 if not page_token:
@@ -226,6 +253,31 @@ class LibraryApiBackend(BackupBackend):
             stats.errors.append(
                 f"Picker-Session {session_id} konnte nicht aufgeräumt werden: {err}"
             )
+
+    def _download_concurrency(self) -> int:
+        """How many item downloads may run at once. Clamped to
+        MAX_DOWNLOAD_CONCURRENCY so a typo in the options can't fire
+        hundreds of parallel requests at Google."""
+        raw = self._option(CONF_DOWNLOAD_CONCURRENCY, DEFAULT_DOWNLOAD_CONCURRENCY)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return DEFAULT_DOWNLOAD_CONCURRENCY
+        return max(1, min(value, MAX_DOWNLOAD_CONCURRENCY))
+
+    async def _download_with_limit(
+        self,
+        sem: asyncio.Semaphore,
+        item: dict[str, Any],
+        target_dir: str,
+        stats: BackupStats,
+        pacer: BandwidthPacer | None,
+    ) -> None:
+        """Semaphore-guarded wrapper. _download_picker_item() already turns
+        every per-item failure into a stats.errors entry, so one bad item
+        can't take the whole gather() down with it."""
+        async with sem:
+            await self._download_picker_item(item, target_dir, stats, pacer=pacer)
 
     def _clear_picker_session(self) -> None:
         self.state.set(CONF_PICKER_SESSION_ID, None)
@@ -252,7 +304,11 @@ class LibraryApiBackend(BackupBackend):
         return datetime.now(timezone.utc) >= expires_at
 
     async def _download_picker_item(
-        self, item: dict[str, Any], target_dir: str, stats: BackupStats
+        self,
+        item: dict[str, Any],
+        target_dir: str,
+        stats: BackupStats,
+        pacer: BandwidthPacer | None = None,
     ) -> None:
         item_id = item.get("id")
         if not item_id:
@@ -292,9 +348,15 @@ class LibraryApiBackend(BackupBackend):
         # integration).
         def _reserve_destination() -> Path:
             dest_dir = dest_dir_for_date(target_dir, taken_at)
-            return unique_destination(dest_dir, filename)
+            return unique_destination(dest_dir, filename, self._reserved_destinations)
 
-        dest = await self.hass.async_add_executor_job(_reserve_destination)
+        # Reserve under a lock so two concurrent workers can't be handed the
+        # same path: the file itself only appears at the final rename, so
+        # without this the second worker's existence check would still say
+        # "free" and one download would clobber the other.
+        async with self._reserve_lock:
+            dest = await self.hass.async_add_executor_job(_reserve_destination)
+            self._reserved_destinations.add(dest)
 
         try:
             resp = await self._oauth.async_request(
@@ -302,7 +364,9 @@ class LibraryApiBackend(BackupBackend):
             )
             resp.raise_for_status()
             # Handles the .part-file + atomic rename itself (issue #9).
-            size = await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
+            size = await throttled_stream_to_file(
+                resp, dest, self.hass, limit_kbps, pacer=pacer
+            )
         except Exception as err:  # noqa: BLE001 - surfaced to the user via sensor
             stats.errors.append(f"{filename}: Download fehlgeschlagen ({err})")
             # unique_destination() created the date folder and reserved the
@@ -310,6 +374,10 @@ class LibraryApiBackend(BackupBackend):
             # .part file, so nothing is left behind but the (possibly
             # empty) directory, which the next item will reuse.
             return
+
+        finally:
+            async with self._reserve_lock:
+                self._reserved_destinations.discard(dest)
 
         def _set_mtime() -> None:
             ts = taken_at.timestamp()

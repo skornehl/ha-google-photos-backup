@@ -21,7 +21,8 @@
         "data": {
           "target_dir": "Zielverzeichnis (lokal gemountet)",
           "sync_interval_minutes": "Sync-Intervall (Minuten)",
-          "bandwidth_limit_kbps": "Bandbreitenlimit (KiB/s, 0 = unbegrenzt)"
+          "bandwidth_limit_kbps": "Bandbreitenlimit (KiB/s, 0 = unbegrenzt)",
+          "download_concurrency": "Parallele Downloads (1-8)"
         }
       },
       "rclone": {
@@ -34,7 +35,8 @@
           "rclone_binary": "Pfad/Name des rclone-Binaries",
           "rclone_config_path": "Pfad zu rclone.conf (leer = Standard)",
           "rclone_source_path": "Quellpfad im Remote (z. B. media/by-month)",
-          "bandwidth_limit_kbps": "Bandbreitenlimit (KiB/s, 0 = unbegrenzt)"
+          "bandwidth_limit_kbps": "Bandbreitenlimit (KiB/s, 0 = unbegrenzt)",
+          "download_concurrency": "Parallele Downloads (1-8)"
         }
       },
       "takeout_drive_choice": {
@@ -53,7 +55,8 @@
           "bandwidth_limit_kbps": "Bandbreitenlimit (KiB/s, 0 = unbegrenzt)",
           "takeout_watch_dir": "Watch-Verzeichnis für Takeout-Archive",
           "takeout_delete_after_import": "Archiv nach erfolgreichem Import löschen",
-          "takeout_download_links": "Takeout-E-Mail-Download-Links (einer pro Zeile, optional)"
+          "takeout_download_links": "Takeout-E-Mail-Download-Links (einer pro Zeile, optional)",
+          "download_concurrency": "Parallele Downloads (1-8)"
         }
       },
       "takeout_drive_options": {
@@ -68,7 +71,8 @@
           "takeout_download_links": "Takeout-E-Mail-Download-Links (einer pro Zeile, optional)",
           "takeout_drive_folder_id": "Drive-Ordner-ID für die Suche (leer = gesamte 'Meine Ablage')",
           "takeout_drive_delete_after_sync": "Archiv nach erfolgreichem Import aus Drive löschen",
-          "takeout_drive_delete_permanently": "Endgültig löschen statt in den Papierkorb verschieben (gibt Quota sofort frei, NICHT wiederherstellbar)"
+          "takeout_drive_delete_permanently": "Endgültig löschen statt in den Papierkorb verschieben (gibt Quota sofort frei, NICHT wiederherstellbar)",
+          "download_concurrency": "Parallele Downloads (1-8)"
         }
       }
     },
@@ -96,7 +100,8 @@
           "takeout_download_links": "Takeout-E-Mail-Download-Links (einer pro Zeile, optional)",
           "takeout_drive_folder_id": "Drive-Ordner-ID für die Suche (leer = gesamte 'Meine Ablage')",
           "takeout_drive_delete_after_sync": "Archiv nach erfolgreichem Import aus Drive löschen",
-          "takeout_drive_delete_permanently": "Endgültig löschen statt in den Papierkorb verschieben (gibt Quota sofort frei, NICHT wiederherstellbar)"
+          "takeout_drive_delete_permanently": "Endgültig löschen statt in den Papierkorb verschieben (gibt Quota sofort frei, NICHT wiederherstellbar)",
+          "download_concurrency": "Parallele Downloads (1-8)"
         }
       }
     }

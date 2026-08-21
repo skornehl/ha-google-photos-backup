@@ -25,6 +25,7 @@ from .const import (
     BACKENDS,
     CONF_BACKEND,
     CONF_BANDWIDTH_LIMIT_KBPS,
+    CONF_DOWNLOAD_CONCURRENCY,
     CONF_RCLONE_BINARY,
     CONF_RCLONE_CONFIG_PATH,
     CONF_RCLONE_REMOTE_NAME,
@@ -40,6 +41,7 @@ from .const import (
     CONF_TARGET_DIR,
     CONFIG_ENTRY_VERSION,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
+    DEFAULT_DOWNLOAD_CONCURRENCY,
     DEFAULT_RCLONE_BINARY,
     DEFAULT_RCLONE_SOURCE_PATH,
     DEFAULT_SYNC_INTERVAL_MINUTES,
@@ -49,6 +51,7 @@ from .const import (
     DEFAULT_TAKEOUT_DRIVE_FOLDER_ID,
     DEFAULT_TAKEOUT_DRIVE_SYNC,
     DOMAIN,
+    MAX_DOWNLOAD_CONCURRENCY,
     MIN_SYNC_INTERVAL_MINUTES,
     OAUTH2_SCOPES,
 )
@@ -74,6 +77,10 @@ def _common_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_BANDWIDTH_LIMIT_KBPS,
                 default=defaults.get(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS),
             ): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Optional(
+                CONF_DOWNLOAD_CONCURRENCY,
+                default=defaults.get(CONF_DOWNLOAD_CONCURRENCY, DEFAULT_DOWNLOAD_CONCURRENCY),
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY)),
         }
     )
 
@@ -352,6 +359,10 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
                 CONF_BANDWIDTH_LIMIT_KBPS,
                 default=_current(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS),
             ): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Optional(
+                CONF_DOWNLOAD_CONCURRENCY,
+                default=_current(CONF_DOWNLOAD_CONCURRENCY, DEFAULT_DOWNLOAD_CONCURRENCY),
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY)),
         }
         if self.config_entry.data.get(CONF_BACKEND) == BACKEND_TAKEOUT:
             schema_dict[

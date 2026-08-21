@@ -42,7 +42,7 @@ async def test_download_streams_to_disk_instead_of_buffering(monkeypatch, tmp_pa
     through the streaming helper, never as one in-memory bytes object."""
     seen: dict[str, object] = {}
 
-    async def _fake_stream_to_file(resp, dest, hass, limit_kbps):
+    async def _fake_stream_to_file(resp, dest, hass, limit_kbps, pacer=None):
         seen["dest"] = dest
         dest.write_bytes(b"payload")
         return 7
@@ -69,7 +69,7 @@ async def test_the_in_memory_read_helper_is_gone():
 
 
 async def test_file_lands_in_the_date_folder_with_capture_mtime(monkeypatch, tmp_path: Path):
-    async def _fake_stream_to_file(resp, dest, hass, limit_kbps):
+    async def _fake_stream_to_file(resp, dest, hass, limit_kbps, pacer=None):
         dest.write_bytes(b"payload")
         return 7
 
@@ -85,7 +85,7 @@ async def test_file_lands_in_the_date_folder_with_capture_mtime(monkeypatch, tmp
 
 
 async def test_failed_download_is_recorded_and_not_marked_processed(monkeypatch, tmp_path: Path):
-    async def _boom(resp, dest, hass, limit_kbps):
+    async def _boom(resp, dest, hass, limit_kbps, pacer=None):
         raise ConnectionError("abgebrochen")
 
     monkeypatch.setattr(library_api_module, "throttled_stream_to_file", _boom)
