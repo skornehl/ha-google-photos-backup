@@ -26,6 +26,16 @@ MIN_SYNC_INTERVAL_MINUTES: Final = 5
 # rclone passes it straight through as its own --bwlimit flag.
 CONF_BANDWIDTH_LIMIT_KBPS: Final = "bandwidth_limit_kbps"
 DEFAULT_BANDWIDTH_LIMIT_KBPS: Final = 0  # 0 = unlimited
+# Concurrent item downloads within one run (issue #20). Modest on purpose:
+# Google's per-user rate limits for the Picker API aren't documented in a
+# form we can tune against, and the win from more parallelism flattens out
+# quickly once the connection - not latency - is the bottleneck. The
+# bandwidth limit stays a *total* across workers via a shared
+# BandwidthPacer, so raising this never multiplies the configured cap.
+CONF_DOWNLOAD_CONCURRENCY: Final = "download_concurrency"
+DEFAULT_DOWNLOAD_CONCURRENCY: Final = 3
+MAX_DOWNLOAD_CONCURRENCY: Final = 8
+
 DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB per network read while streaming
 DRIVE_DOWNLOAD_FLUSH_SIZE: Final = 8 * 1024 * 1024  # buffered writes for large archives
 

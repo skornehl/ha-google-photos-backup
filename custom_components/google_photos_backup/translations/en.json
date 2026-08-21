@@ -21,7 +21,8 @@
         "data": {
           "target_dir": "Target directory (local mount)",
           "sync_interval_minutes": "Sync interval (minutes)",
-          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)"
+          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
+          "download_concurrency": "Parallel downloads (1-8)"
         }
       },
       "rclone": {
@@ -34,7 +35,8 @@
           "rclone_binary": "rclone binary path/name",
           "rclone_config_path": "Path to rclone.conf (empty = default)",
           "rclone_source_path": "Source path in remote (e.g. media/by-month)",
-          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)"
+          "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
+          "download_concurrency": "Parallel downloads (1-8)"
         }
       },
       "takeout_drive_choice": {
@@ -53,7 +55,8 @@
           "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
           "takeout_watch_dir": "Watch directory for Takeout archives",
           "takeout_delete_after_import": "Delete archive after successful import",
-          "takeout_download_links": "Takeout email download links (one per line, optional)"
+          "takeout_download_links": "Takeout email download links (one per line, optional)",
+          "download_concurrency": "Parallel downloads (1-8)"
         }
       },
       "takeout_drive_options": {
@@ -68,7 +71,8 @@
           "takeout_download_links": "Takeout email download links (one per line, optional)",
           "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)",
           "takeout_drive_delete_after_sync": "Delete archive from Drive after successful import",
-          "takeout_drive_delete_permanently": "Delete permanently instead of moving to trash (frees quota immediately, NOT recoverable)"
+          "takeout_drive_delete_permanently": "Delete permanently instead of moving to trash (frees quota immediately, NOT recoverable)",
+          "download_concurrency": "Parallel downloads (1-8)"
         }
       }
     },
@@ -96,7 +100,8 @@
           "takeout_download_links": "Takeout email download links (one per line, optional)",
           "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)",
           "takeout_drive_delete_after_sync": "Delete archive from Drive after successful import",
-          "takeout_drive_delete_permanently": "Delete permanently instead of moving to trash (frees quota immediately, NOT recoverable)"
+          "takeout_drive_delete_permanently": "Delete permanently instead of moving to trash (frees quota immediately, NOT recoverable)",
+          "download_concurrency": "Parallel downloads (1-8)"
         }
       }
     }

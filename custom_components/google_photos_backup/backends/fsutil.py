@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+from collections.abc import Container
 from datetime import datetime
 from pathlib import Path
 
@@ -49,22 +50,39 @@ def dest_dir_for_date(target_dir: str, taken_at: datetime) -> Path:
     return Path(target_dir) / f"{taken_at.year:04d}" / f"{taken_at.year:04d}-{taken_at.month:02d}"
 
 
-def unique_destination(dest_dir: Path, filename: str) -> Path:
+def unique_destination(
+    dest_dir: Path, filename: str, reserved: Container[Path] | None = None
+) -> Path:
     """Return a free path for `filename` inside dest_dir.
 
     Original filenames are preserved where possible; only on an actual name
     collision (different file, same name - Google reuses names like
     IMG_0001.jpg constantly) do we append a numeric suffix.
+
+    `reserved` holds destinations that are claimed but do not exist on disk
+    yet. That case is specific to concurrent downloads (issue #20): a
+    download writes to `<dest>.part` and only renames onto `dest` at the
+    very end, so between reserving a name and finishing, `dest.exists()` is
+    still False - and a second worker handed the same filename would pick
+    the identical path and one download would overwrite the other. Existence
+    alone is therefore not a sufficient uniqueness check while downloads
+    overlap.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
+
+    def _free(path: Path) -> bool:
+        if path.exists():
+            return False
+        return reserved is None or path not in reserved
+
     candidate = dest_dir / filename
-    if not candidate.exists():
+    if _free(candidate):
         return candidate
     stem, suffix = os.path.splitext(filename)
     n = 1
     while True:
         candidate = dest_dir / f"{stem}_{n}{suffix}"
-        if not candidate.exists():
+        if _free(candidate):
             return candidate
         n += 1
 
