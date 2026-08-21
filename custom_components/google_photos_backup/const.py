@@ -143,6 +143,11 @@ DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC: Final = False
 CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY: Final = "takeout_drive_delete_permanently"
 DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY: Final = False
 
+# --- config entry schema ------------------------------------------------------
+# Single source of truth for both config_flow.VERSION and
+# __init__.async_migrate_entry, so the two can't drift apart.
+CONFIG_ENTRY_VERSION: Final = 1
+
 # --- persisted sync state (Store) ------------------------------------------
 STORAGE_VERSION: Final = 1
 STORAGE_KEY_TEMPLATE: Final = f"{DOMAIN}_{{entry_id}}"

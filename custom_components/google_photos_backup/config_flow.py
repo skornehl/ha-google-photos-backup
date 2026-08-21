@@ -38,6 +38,7 @@ from .const import (
     CONF_TAKEOUT_DRIVE_SYNC,
     CONF_TAKEOUT_WATCH_DIR,
     CONF_TARGET_DIR,
+    CONFIG_ENTRY_VERSION,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
     DEFAULT_RCLONE_BINARY,
     DEFAULT_RCLONE_SOURCE_PATH,
@@ -130,7 +131,7 @@ class GooglePhotosBackupFlowHandler(
     into the inherited pick_implementation/auth steps.
     """
 
-    VERSION = 1
+    VERSION = CONFIG_ENTRY_VERSION
     DOMAIN = DOMAIN
 
     def __init__(self) -> None:
