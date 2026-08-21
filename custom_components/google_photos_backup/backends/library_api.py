@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -70,8 +71,9 @@ class LibraryApiBackend(BackupBackend):
         entry: ConfigEntry,
         state: SyncStateStore,
         oauth_session: config_entry_oauth2_flow.OAuth2Session,
+        on_progress: Callable[[BackupStats], None] | None = None,
     ) -> None:
-        super().__init__(hass, entry, state)
+        super().__init__(hass, entry, state, on_progress)
         self._oauth = oauth_session
 
     async def async_validate(self) -> None:
@@ -319,6 +321,7 @@ class LibraryApiBackend(BackupBackend):
         self.state.set("processed_ids", processed_ids)
         stats.files_downloaded += 1
         stats.bytes_downloaded += size
+        self._report_progress(stats)
 
     # -- Library API (app-created items only) -------------------------------
 
