@@ -154,7 +154,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
 def _get_coordinator(hass: HomeAssistant, entry_id: str) -> GooglePhotosBackupCoordinator:
     try:
-        return hass.data[DOMAIN][entry_id]
+        # hass.data is untyped, so annotate what we know we put in it
+        # rather than returning Any from a typed function.
+        coordinator: GooglePhotosBackupCoordinator = hass.data[DOMAIN][entry_id]
+        return coordinator
     except KeyError as err:
         raise HomeAssistantError(
             f"Kein Google Photos Backup Config-Entry mit ID {entry_id} gefunden"

@@ -14,6 +14,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers import config_entry_oauth2_flow, selector
 
@@ -313,7 +314,7 @@ class GooglePhotosBackupFlowHandler(
         return self.async_create_entry(title=title, data=self._data)
 
     @staticmethod
-    @config_entries.callback
+    @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> GooglePhotosBackupOptionsFlow:

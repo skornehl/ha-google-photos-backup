@@ -84,15 +84,19 @@ class LibraryApiBackend(BackupBackend):
         resp = await self._oauth.async_request("POST", f"{PICKER_API_BASE}/sessions", json={})
         resp.raise_for_status()
         payload = await resp.json()
-        self.state.set(CONF_PICKER_SESSION_ID, payload["id"])
-        self.state.set(CONF_PICKER_SESSION_URI, payload["pickerUri"])
+        # resp.json() is Any; pin the two fields we promise to callers so
+        # the declared -> str return type actually means something.
+        session_id = str(payload["id"])
+        picker_uri = str(payload["pickerUri"])
+        self.state.set(CONF_PICKER_SESSION_ID, session_id)
+        self.state.set(CONF_PICKER_SESSION_URI, picker_uri)
         self.state.set(CONF_PICKER_SESSION_EXPIRES, payload.get("expireTime"))
         _LOGGER.info(
             "Google Photos Picker-Session gestartet - Nutzer muss %s "
             "öffnen und Fotos auswählen",
-            payload["pickerUri"],
+            picker_uri,
         )
-        return payload["pickerUri"]
+        return picker_uri
 
     async def async_run_backup(self) -> BackupStats:
         """Downloads run strictly sequentially, one item at a time.
