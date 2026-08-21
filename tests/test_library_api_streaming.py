@@ -86,7 +86,7 @@ async def test_file_lands_in_the_date_folder_with_capture_mtime(monkeypatch, tmp
 
 async def test_failed_download_is_recorded_and_not_marked_processed(monkeypatch, tmp_path: Path):
     async def _boom(resp, dest, hass, limit_kbps, pacer=None):
-        raise ConnectionError("abgebrochen")
+        raise ConnectionError("aborted")
 
     monkeypatch.setattr(library_api_module, "throttled_stream_to_file", _boom)
 
@@ -94,7 +94,7 @@ async def test_failed_download_is_recorded_and_not_marked_processed(monkeypatch,
     stats = BackupStats()
     await backend._download_picker_item(_ITEM, str(tmp_path), stats)
 
-    assert any("fehlgeschlagen" in e for e in stats.errors)
+    assert any("download failed" in e for e in stats.errors)
     assert stats.files_downloaded == 0
     # Not recorded -> retried on the next run rather than silently lost.
     assert backend.state.get("processed_ids", []) == []

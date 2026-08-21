@@ -52,8 +52,15 @@ GERMAN_WORDS = (
     "unbekannt", "unbekannte", "unbekanntes",
     "datei", "dateien", "fehler", "ordner", "verzeichnis",
     "aufruf", "zeitstempel", "lauf", "laeuft",
-    "erneut", "bereits", "vorhanden", "gefunden", "abgeschlossen",
+    "erneut", "bereits", "vorhanden", "vorhandene", "gefunden", "abgeschlossen",
     "loeschen", "geloescht", "pruefen", "auswahl", "groesse",
+    # Past participles and prose words that got past an earlier version of
+    # this list. Extended whenever something slips through in review - the
+    # list is empirical, not a grammar.
+    "fehlgeschlagen", "abgebrochen", "gedrosselt", "gemeldet", "freigegeben",
+    "gestartet", "beendet", "uebersprungen", "heruntergeladen", "laufenden",
+    "statt", "wenig", "bekam", "denselben", "zweiter", "verwertbaren",
+    "rohliste", "kennzahl",
 )
 GERMAN_WORD_RE = re.compile(r"\b(" + "|".join(GERMAN_WORDS) + r")\b", re.IGNORECASE)
 

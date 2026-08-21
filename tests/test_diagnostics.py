@@ -52,7 +52,7 @@ async def test_no_secret_survives_serialization(hass):
     blob = json.dumps(result)
 
     for secret in (_ACCESS_TOKEN, _REFRESH_TOKEN, _LINK_SECRET):
-        assert secret not in blob, f"Secret im Diagnostics-Export: {secret}"
+        assert secret not in blob, f"secret leaked into the diagnostics export: {secret}"
 
 
 async def test_useful_non_secret_context_is_kept(hass):
@@ -85,7 +85,7 @@ async def test_sync_state_is_summarized_not_dumped(hass):
     blob = json.dumps(result)
 
     assert state["processed_hashes_count"] == 500
-    assert "hash499" not in blob, "Rohliste statt Kennzahl exportiert"
+    assert "hash499" not in blob, "raw list exported instead of a count"
     assert state["processed_ids_count"] == 2
     assert state["has_pending_picker_session"] is True
     # Errors are the most useful support signal, but capped.

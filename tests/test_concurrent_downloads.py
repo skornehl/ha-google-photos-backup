@@ -80,7 +80,7 @@ async def test_one_pacer_shared_across_workers_keeps_the_limit_total():
 
     # 10 x 100 KiB at 100 KiB/s == ~10s of pacing, minus the first chunk
     # which needs no delay.
-    assert slept >= 8.0, f"zu wenig gedrosselt: {slept}s"
+    assert slept >= 8.0, f"not throttled enough: {slept}s"
 
 
 async def test_unlimited_pacer_never_sleeps():
@@ -101,7 +101,7 @@ def test_unique_destination_skips_reserved_but_nonexistent_paths(tmp_path: Path)
     second = unique_destination(tmp_path, "IMG_0001.jpg", reserved)
 
     assert first.name == "IMG_0001.jpg"
-    assert second != first, "zweiter Worker bekam denselben Pfad"
+    assert second != first, "second worker was handed the same path"
     assert second.name == "IMG_0001_1.jpg"
 
 
