@@ -170,6 +170,11 @@ SERVICE_START_PICKER_SESSION: Final = "start_picker_session"
 # Sensor keys - also used as translation_key / unique_id suffix, see
 # sensor.py. Kept as constants rather than repeated string literals so a
 # typo in one place can't silently desync from the other.
+# Sensors are updated while a run is still going (issue #21), but a big
+# import reports once per file and each report writes state for every
+# entity. Throttle so a backup run doesn't flood the recorder.
+PROGRESS_MIN_INTERVAL_SECONDS: Final = 5.0
+
 ATTR_LAST_SYNC: Final = "last_sync"
 ATTR_FILES_BACKED_UP: Final = "files_backed_up"
 ATTR_LAST_ERROR: Final = "last_error"

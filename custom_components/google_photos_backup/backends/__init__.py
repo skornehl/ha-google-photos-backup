@@ -1,6 +1,8 @@
 """Backend abstraction: pick the right BackupBackend for a config entry."""
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
@@ -48,7 +50,10 @@ def scopes_for_backend(backend_type: str | None) -> list[str] | None:
 
 
 async def async_create_backend(
-    hass: HomeAssistant, entry: ConfigEntry, state: SyncStateStore
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    state: SyncStateStore,
+    on_progress: Callable[[BackupStats], None] | None = None,
 ) -> BackupBackend:
     backend_type = entry.data[CONF_BACKEND]
 
@@ -57,10 +62,10 @@ async def async_create_backend(
             hass, entry
         )
         oauth_session = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
-        return LibraryApiBackend(hass, entry, state, oauth_session)
+        return LibraryApiBackend(hass, entry, state, oauth_session, on_progress=on_progress)
 
     if backend_type == BACKEND_RCLONE:
-        return RcloneBackend(hass, entry, state)
+        return RcloneBackend(hass, entry, state, on_progress=on_progress)
 
     if backend_type == BACKEND_TAKEOUT:
         # Distinct name from the library_api branch above: that one binds
@@ -72,6 +77,8 @@ async def async_create_backend(
                 hass, entry
             )
             takeout_oauth = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
-        return TakeoutBackend(hass, entry, state, oauth_session=takeout_oauth)
+        return TakeoutBackend(
+            hass, entry, state, oauth_session=takeout_oauth, on_progress=on_progress
+        )
 
     raise ValueError(f"Unbekanntes Backend: {backend_type}")
