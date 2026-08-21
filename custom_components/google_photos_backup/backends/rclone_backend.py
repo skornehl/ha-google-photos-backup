@@ -17,7 +17,11 @@ import asyncio
 import json
 import logging
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 
 from ..const import (
     CONF_BANDWIDTH_LIMIT_KBPS,
@@ -30,14 +34,20 @@ from ..const import (
     DEFAULT_RCLONE_BINARY,
     RCLONE_TIMEOUT_SECONDS,
 )
-from .base import BackupBackend, BackupStats
+from .base import BackupBackend, BackupStats, SyncStateStore
 from .fsutil import ensure_target_dir
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class RcloneBackend(BackupBackend):
-    def __init__(self, hass, entry, state, on_progress=None) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        state: SyncStateStore,
+        on_progress: Callable[[BackupStats], None] | None = None,
+    ) -> None:
         super().__init__(hass, entry, state, on_progress)
         self._proc: asyncio.subprocess.Process | None = None
 
