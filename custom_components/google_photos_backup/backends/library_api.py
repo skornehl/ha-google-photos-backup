@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -51,7 +52,7 @@ from ..const import (
 )
 from .base import BackupBackend, BackupStats, SyncStateStore
 from .fsutil import dest_dir_for_date, ensure_target_dir, unique_destination
-from .throttle import throttled_read
+from .throttle import throttled_stream_to_file
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -244,35 +245,40 @@ class LibraryApiBackend(BackupBackend):
             taken_at = datetime.now(timezone.utc)
 
         limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
+
+        # Reserve the destination name *before* downloading: the response
+        # is streamed straight to disk rather than buffered in memory
+        # (see issue #45 - Google Photos serves multi-GB 4K videos through
+        # this same path, and HA commonly runs on 2-4 GB hardware where
+        # buffering one would OOM the whole process, not just this
+        # integration).
+        def _reserve_destination() -> Path:
+            dest_dir = dest_dir_for_date(target_dir, taken_at)
+            return unique_destination(dest_dir, filename)
+
+        dest = await self.hass.async_add_executor_job(_reserve_destination)
+
         try:
             resp = await self._oauth.async_request(
                 "GET", base_url + suffix, timeout=DOWNLOAD_TIMEOUT
             )
             resp.raise_for_status()
-            raw = await throttled_read(resp, limit_kbps)
+            # Handles the .part-file + atomic rename itself (issue #9).
+            size = await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
         except Exception as err:  # noqa: BLE001 - surfaced to the user via sensor
             stats.errors.append(f"{filename}: Download fehlgeschlagen ({err})")
+            # unique_destination() created the date folder and reserved the
+            # name; throttled_stream_to_file() already removed its own
+            # .part file, so nothing is left behind but the (possibly
+            # empty) directory, which the next item will reuse.
             return
 
-        def _write() -> int:
-            dest_dir = dest_dir_for_date(target_dir, taken_at)
-            dest = unique_destination(dest_dir, filename)
-            # Write to a .part sibling and only rename onto the final name
-            # once fully written - a process kill mid-write can then never
-            # leave a truncated file sitting at the name the rest of the
-            # code treats as "this photo is done" (see issue #9).
-            tmp_path = dest.with_name(dest.name + ".part")
-            try:
-                tmp_path.write_bytes(raw)
-                ts = taken_at.timestamp()
-                os.utime(tmp_path, (ts, ts))
-                os.replace(tmp_path, dest)
-            except BaseException:
-                tmp_path.unlink(missing_ok=True)
-                raise
-            return len(raw)
+        def _set_mtime() -> None:
+            ts = taken_at.timestamp()
+            os.utime(dest, (ts, ts))
 
-        size = await self.hass.async_add_executor_job(_write)
+        await self.hass.async_add_executor_job(_set_mtime)
+
         processed_ids.append(item_id)
         self.state.set("processed_ids", processed_ids)
         stats.files_downloaded += 1
