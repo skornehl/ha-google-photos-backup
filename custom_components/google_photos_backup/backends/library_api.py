@@ -102,8 +102,8 @@ class LibraryApiBackend(BackupBackend):
         self.state.set(CONF_PICKER_SESSION_URI, picker_uri)
         self.state.set(CONF_PICKER_SESSION_EXPIRES, payload.get("expireTime"))
         _LOGGER.info(
-            "Google Photos Picker-Session gestartet - Nutzer muss %s "
-            "öffnen und Fotos auswählen",
+            "Google Photos picker session started - the user has to open %s "
+            "and select photos",
             picker_uri,
         )
         return picker_uri
@@ -138,9 +138,9 @@ class LibraryApiBackend(BackupBackend):
         # dead *before* spending a network round-trip on it.
         if self._is_picker_session_expired():
             _LOGGER.info(
-                "Picker-Session %s laut gespeichertem expireTime abgelaufen - "
-                "verwerfe sie ohne Google-Anfrage. Neue Auswahl über den "
-                "Service start_picker_session starten.",
+                "Picker session %s has expired according to the stored expireTime - "
+                "discarding it without asking Google. Start a new selection via the "
+                "start_picker_session service.",
                 session_id,
             )
             self._clear_picker_session()
@@ -159,13 +159,13 @@ class LibraryApiBackend(BackupBackend):
                 "GET", f"{PICKER_API_BASE}/sessions/{session_id}"
             )
             if resp.status == 404:
-                _LOGGER.warning("Picker-Session %s nicht mehr gültig, verwerfe sie", session_id)
+                _LOGGER.warning("Picker session %s is no longer valid, discarding it", session_id)
                 self._clear_picker_session()
                 return
             resp.raise_for_status()
             session = await resp.json()
             if not session.get("mediaItemsSet"):
-                _LOGGER.debug("Picker-Session %s: Nutzer hat noch nicht abgeschlossen", session_id)
+                _LOGGER.debug("Picker session %s: user has not finished selecting yet", session_id)
                 return
 
             target_dir = self.entry.data[CONF_TARGET_DIR]
@@ -208,8 +208,8 @@ class LibraryApiBackend(BackupBackend):
                 while index < len(items):
                     if loop.time() - fetched_at > BASEURL_MAX_AGE_SECONDS:
                         _LOGGER.info(
-                            "baseUrls dieser Seite sind bald abgelaufen - fordere "
-                            "Seite erneut an und setze bei Item %s/%s fort",
+                            "baseUrls on this page are about to expire - refetching "
+                            "the page and resuming at item %s/%s",
                             index + 1,
                             len(items),
                         )
@@ -238,7 +238,7 @@ class LibraryApiBackend(BackupBackend):
                 if not page_token:
                     break
         except Exception as err:  # noqa: BLE001
-            stats.errors.append(f"Picker-Session-Verarbeitung fehlgeschlagen: {err}")
+            stats.errors.append(f"Processing the picker session failed: {err}")
             return
 
         try:
@@ -246,7 +246,7 @@ class LibraryApiBackend(BackupBackend):
                 "DELETE", f"{PICKER_API_BASE}/sessions/{session_id}"
             )
             self._clear_picker_session()
-            _LOGGER.info("Picker-Session %s abgeschlossen und aufgeräumt", session_id)
+            _LOGGER.info("Picker session %s finished and cleaned up", session_id)
         except Exception as err:  # noqa: BLE001
             # All items in this session are already downloaded and recorded
             # in processed_ids by this point - losing the DELETE just means
@@ -255,7 +255,7 @@ class LibraryApiBackend(BackupBackend):
             # harmless: every item gets skipped via processed_ids). Not
             # worth treating as a bigger failure than it is.
             stats.errors.append(
-                f"Picker-Session {session_id} konnte nicht aufgeräumt werden: {err}"
+                f"Could not clean up picker session {session_id}: {err}"
             )
 
     def _download_concurrency(self) -> int:
@@ -319,7 +319,7 @@ class LibraryApiBackend(BackupBackend):
             # No id means we can't record it in processed_ids, so it would
             # be re-downloaded on every single run forever. Skip loudly
             # rather than silently accumulating duplicates.
-            stats.errors.append("Picker-Item ohne id in der Antwort - übersprungen")
+            stats.errors.append("Picker item without an id in the response - skipped")
             return
 
         processed_ids: list[str] = self.state.get("processed_ids", [])
@@ -332,7 +332,7 @@ class LibraryApiBackend(BackupBackend):
         filename = media_file.get("filename", f"{item_id}.jpg")
         mime_type = media_file.get("mimeType", "")
         if not base_url:
-            stats.errors.append(f"{filename}: keine baseUrl in Picker-Antwort")
+            stats.errors.append(f"{filename}: no baseUrl in the picker response")
             return
 
         suffix = "=dv" if mime_type.startswith("video/") else "=d"
@@ -372,7 +372,7 @@ class LibraryApiBackend(BackupBackend):
                 resp, dest, self.hass, limit_kbps, pacer=pacer
             )
         except Exception as err:  # noqa: BLE001 - surfaced to the user via sensor
-            stats.errors.append(f"{filename}: Download fehlgeschlagen ({err})")
+            stats.errors.append(f"{filename}: download failed ({err})")
             # unique_destination() created the date folder and reserved the
             # name; throttled_stream_to_file() already removed its own
             # .part file, so nothing is left behind but the (possibly
@@ -416,14 +416,14 @@ class LibraryApiBackend(BackupBackend):
             )
             if resp.status == 403:
                 _LOGGER.debug(
-                    "Library API mediaItems.list: 403 (erwartet, falls keine "
-                    "app-eigenen Medien vorhanden sind)"
+                    "Library API mediaItems.list: 403 (expected when there is no "
+                    "app-created media)"
                 )
                 return
             resp.raise_for_status()
             payload = await resp.json()
         except Exception as err:  # noqa: BLE001
-            stats.errors.append(f"Library API Sync fehlgeschlagen: {err}")
+            stats.errors.append(f"Library API sync failed: {err}")
             return
 
         target_dir = self.entry.data[CONF_TARGET_DIR]

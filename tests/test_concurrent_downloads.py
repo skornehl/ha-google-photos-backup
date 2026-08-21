@@ -138,7 +138,7 @@ async def test_two_same_named_items_do_not_overwrite_each_other(monkeypatch, tmp
     written = sorted(p.name for p in (tmp_path / "2026" / "2026-08").iterdir())
     assert written == ["IMG_0001.jpg", "IMG_0001_1.jpg"], written
     assert stats.files_downloaded == 2
-    assert backend._reserved_destinations == set(), "Reservierungen nicht freigegeben"
+    assert backend._reserved_destinations == set(), "reservations were not released"
 
 
 async def test_reservation_is_released_even_when_the_download_fails(monkeypatch, tmp_path: Path):
@@ -151,8 +151,8 @@ async def test_reservation_is_released_even_when_the_download_fails(monkeypatch,
     stats = BackupStats()
     await backend._download_picker_item(_item("a", "x.jpg"), str(tmp_path), stats)
 
-    assert stats.errors, "Fehler nicht gemeldet"
-    assert backend._reserved_destinations == set(), "Reservierung nach Fehler nicht freigegeben"
+    assert stats.errors, "error was not reported"
+    assert backend._reserved_destinations == set(), "reservation not released after an error"
 
 
 # -- 3. concurrency configuration ------------------------------------------

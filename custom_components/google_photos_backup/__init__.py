@@ -71,17 +71,16 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if entry.version > CONFIG_ENTRY_VERSION:
         _LOGGER.error(
-            "Config-Entry hat Version %s, diese Version der Integration kennt "
-            "nur bis %s - vermutlich wurde die Integration herabgestuft. "
-            "Entry wird nicht geladen, um die gespeicherten Daten nicht zu "
-            "beschädigen.",
+            "Config entry is at version %s, but this version of the integration "
+            "only knows up to %s - the integration was most likely downgraded. "
+            "Not loading the entry, so the stored data does not get corrupted.",
             entry.version,
             CONFIG_ENTRY_VERSION,
         )
         return False
 
     _LOGGER.error(
-        "Kein Migrationspfad von Config-Entry-Version %s auf %s",
+        "No migration path from config entry version %s to %s",
         entry.version,
         CONFIG_ENTRY_VERSION,
     )
@@ -131,13 +130,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
         backend = coordinator.backend
         if not isinstance(backend, LibraryApiBackend):
             raise HomeAssistantError(
-                "start_picker_session ist nur für das library_api-Backend verfügbar"
+                "start_picker_session is only available for the library_api backend"
             )
         picker_uri = await backend.async_start_picker_session()
         persistent_notification.async_create(
             hass,
-            f"Öffne diesen Link und wähle die zu sichernden Fotos aus:\n\n{picker_uri}",
-            title="Google Photos Backup: Auswahl erforderlich",
+            f"Open this link and select the photos to back up:\n\n{picker_uri}",
+            title="Google Photos Backup: selection required",
             notification_id=f"{DOMAIN}_picker_{coordinator.entry.entry_id}",
         )
 
@@ -160,5 +159,5 @@ def _get_coordinator(hass: HomeAssistant, entry_id: str) -> GooglePhotosBackupCo
         return coordinator
     except KeyError as err:
         raise HomeAssistantError(
-            f"Kein Google Photos Backup Config-Entry mit ID {entry_id} gefunden"
+            f"No Google Photos Backup config entry found with ID {entry_id}"
         ) from err

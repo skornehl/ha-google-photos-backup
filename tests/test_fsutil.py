@@ -86,14 +86,14 @@ def test_sha256_file_is_stable_across_chunk_boundaries(tmp_path: Path):
 
 def test_ensure_target_dir_raises_on_missing_directory(tmp_path: Path):
     missing = tmp_path / "does-not-exist"
-    with pytest.raises(ValueError, match="existiert nicht"):
+    with pytest.raises(ValueError, match="does not exist"):
         ensure_target_dir(str(missing))
 
 
 def test_ensure_target_dir_raises_on_file_instead_of_directory(tmp_path: Path):
     a_file = tmp_path / "not-a-dir"
     a_file.write_bytes(b"")
-    with pytest.raises(ValueError, match="existiert nicht"):
+    with pytest.raises(ValueError, match="does not exist"):
         ensure_target_dir(str(a_file))
 
 
@@ -111,7 +111,7 @@ def test_ensure_target_dir_raises_on_readonly_directory(tmp_path: Path):
 
     tmp_path.chmod(0o500)  # read + execute, no write
     try:
-        with pytest.raises(ValueError, match="nicht beschreibbar"):
+        with pytest.raises(ValueError, match="not writable"):
             ensure_target_dir(str(tmp_path))
     finally:
         tmp_path.chmod(0o700)  # restore so pytest can clean up tmp_path

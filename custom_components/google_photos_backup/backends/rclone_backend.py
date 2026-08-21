@@ -56,7 +56,7 @@ class RcloneBackend(BackupBackend):
         unload/reload so a sync in progress doesn't keep running detached
         from HA (see issue #6)."""
         if self._proc is not None and self._proc.returncode is None:
-            _LOGGER.warning("Beende laufenden rclone-Prozess (Unload/Reload)")
+            _LOGGER.warning("Terminating running rclone process (unload/reload)")
             self._proc.kill()
             await self._proc.wait()
 
@@ -68,21 +68,21 @@ class RcloneBackend(BackupBackend):
         found = await self.hass.async_add_executor_job(shutil.which, binary)
         if not found:
             raise ValueError(
-                f"rclone-Binary '{binary}' wurde nicht gefunden (PATH). "
-                "rclone ist in Home Assistant OS/Container nicht enthalten - "
-                "es muss z. B. über ein eigenes Add-on/Image oder einen "
-                "gemounteten Pfad bereitgestellt werden."
+                f"rclone binary '{binary}' was not found on PATH. "
+                "rclone is not bundled with Home Assistant OS/Container - "
+                "it has to be provided separately, e.g. through a custom "
+                "add-on/image or a mounted path."
             )
 
         config_path = self.entry.data.get(CONF_RCLONE_CONFIG_PATH)
         if config_path and not await self.hass.async_add_executor_job(
             Path(config_path).is_file
         ):
-            raise ValueError(f"rclone.conf nicht gefunden unter: {config_path}")
+            raise ValueError(f"rclone.conf not found at: {config_path}")
 
         remote = self.entry.data.get(CONF_RCLONE_REMOTE_NAME)
         if not remote:
-            raise ValueError("Kein rclone-Remote-Name konfiguriert")
+            raise ValueError("No rclone remote name configured")
 
     async def async_run_backup(self) -> BackupStats:
         stats = BackupStats()
@@ -124,10 +124,9 @@ class RcloneBackend(BackupBackend):
             proc.kill()
             await proc.wait()
             stats.errors.append(
-                f"rclone-Prozess nach {RCLONE_TIMEOUT_SECONDS}s ohne Abschluss "
-                "abgebrochen (vermutlich hängender Prozess - ein normaler, "
-                "gedrosselter Großtransfer sollte diese großzügige Grenze "
-                "nicht erreichen)."
+                f"rclone process killed after {RCLONE_TIMEOUT_SECONDS}s without "
+                "finishing (most likely a hung process - a normal throttled "
+                "bulk transfer should not come close to this generous limit)."
             )
             return stats
         finally:
@@ -138,7 +137,7 @@ class RcloneBackend(BackupBackend):
 
         if proc.returncode != 0:
             stats.errors.append(
-                f"rclone beendete sich mit Exit-Code {proc.returncode}"
+                f"rclone exited with exit code {proc.returncode}"
             )
             tail = stderr.decode(errors="replace").strip().splitlines()[-5:]
             if tail:

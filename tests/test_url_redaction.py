@@ -25,8 +25,8 @@ _SECRET = "SUPER_SECRET_TOKEN_VALUE"
             "https://example.com/files/takeout-001.zip",
             "https://example.com/files/takeout-001.zip",
         ),
-        ("not a url at all", "<nicht parsebare URL>"),
-        ("", "<nicht parsebare URL>"),
+        ("not a url at all", "<unparsable URL>"),
+        ("", "<unparsable URL>"),
     ],
 )
 def test_redact_url(url: str, expected: str):

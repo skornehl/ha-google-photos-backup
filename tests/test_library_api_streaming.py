@@ -53,7 +53,7 @@ async def test_download_streams_to_disk_instead_of_buffering(monkeypatch, tmp_pa
     stats = BackupStats()
     await backend._download_picker_item(_ITEM, str(tmp_path), stats)
 
-    assert seen, "throttled_stream_to_file wurde nicht aufgerufen"
+    assert seen, "throttled_stream_to_file was not called"
     assert stats.errors == []
     assert stats.files_downloaded == 1
     assert stats.bytes_downloaded == 7
@@ -79,7 +79,7 @@ async def test_file_lands_in_the_date_folder_with_capture_mtime(monkeypatch, tmp
     await backend._download_picker_item(_ITEM, str(tmp_path), BackupStats())
 
     written = tmp_path / "2026" / "2026-08" / "clip.mp4"
-    assert written.is_file(), f"nicht gefunden: {list(tmp_path.rglob('*'))}"
+    assert written.is_file(), f"not found: {list(tmp_path.rglob('*'))}"
     # createTime 2026-08-01T00:00:00Z -> mtime must follow it, not "now"
     assert written.stat().st_mtime == 1785542400.0
 

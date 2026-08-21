@@ -108,7 +108,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         except ClientResponseError as err:
             if err.status in AUTH_FAILURE_STATUS_CODES:
                 raise ConfigEntryAuthFailed(
-                    f"Google-Autorisierung ungültig oder widerrufen ({err.status})"
+                    f"Google authorisation invalid or revoked ({err.status})"
                 ) from err
             raise
 
@@ -149,12 +149,12 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         except ClientResponseError as err:
             if err.status in AUTH_FAILURE_STATUS_CODES:
                 raise ConfigEntryAuthFailed(
-                    f"Google-Autorisierung ungültig oder widerrufen ({err.status}) - "
-                    "bitte Integration neu autorisieren."
+                    f"Google authorisation invalid or revoked ({err.status}) - "
+                    "please re-authorise the integration."
                 ) from err
-            raise UpdateFailed(f"Backup-Lauf fehlgeschlagen: {err}") from err
+            raise UpdateFailed(f"Backup run failed: {err}") from err
         except Exception as err:  # noqa: BLE001
-            raise UpdateFailed(f"Backup-Lauf fehlgeschlagen: {err}") from err
+            raise UpdateFailed(f"Backup run failed: {err}") from err
 
         self._files_backed_up_total += stats.files_downloaded
         self._state_data["files_backed_up_total"] = self._files_backed_up_total
@@ -168,7 +168,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             try:
                 free = await self.hass.async_add_executor_job(free_bytes, target_dir)
             except OSError as err:
-                _LOGGER.debug("Konnte freien Speicherplatz nicht ermitteln: %s", err)
+                _LOGGER.debug("Could not determine free disk space: %s", err)
 
         return BackupData(
             last_sync=datetime.fromisoformat(self._state_data["last_sync"]),

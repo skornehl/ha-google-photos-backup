@@ -37,6 +37,8 @@ jobs:
           EOF
       - name: Check strings.json / translations are key-for-key in sync
         run: python3 tests/check_translations_sync.py
+      - name: Check the source is English-only
+        run: python3 tests/check_english_only.py
 
   hassfest:
     name: hassfest (official HA integration validator)

@@ -125,7 +125,7 @@ class TakeoutBackend(BackupBackend):
         await self.hass.async_add_executor_job(ensure_target_dir, target_dir)
         watch_path = Path(watch_dir)
         if not await self.hass.async_add_executor_job(watch_path.is_dir):
-            raise ValueError(f"Watch-Verzeichnis existiert nicht: {watch_dir}")
+            raise ValueError(f"Watch directory does not exist: {watch_dir}")
         if self._oauth is not None:
             await self._oauth.async_ensure_token_valid()
 
@@ -152,7 +152,7 @@ class TakeoutBackend(BackupBackend):
 
         archives = await self.hass.async_add_executor_job(self._list_new_archives, watch_dir)
         for archive in archives:
-            _LOGGER.info("Importiere Takeout-Archiv: %s", archive)
+            _LOGGER.info("Importing Takeout archive: %s", archive)
             try:
                 await self.hass.async_add_executor_job(
                     self._import_archive, archive, target_dir, stats
@@ -209,7 +209,7 @@ class TakeoutBackend(BackupBackend):
             # Truncated like the error message below: these URLs carry
             # Google-issued auth material in their query string, and HA
             # logs get pasted into issue reports/diagnostics uploads.
-            _LOGGER.info("Lade Takeout-Archiv von manuellem Link herunter: %s", _redact_url(url))
+            _LOGGER.info("Downloading Takeout archive from a manual link: %s", _redact_url(url))
             dest: Path | None = None
             try:
                 async with session.get(
@@ -222,10 +222,10 @@ class TakeoutBackend(BackupBackend):
                         # browser session we don't have here. Fail loudly
                         # instead of silently saving the HTML as a "zip".
                         raise ValueError(
-                            "Antwort ist eine HTML-Seite statt eines Archivs - "
-                            "dieser Link verlangt vermutlich eine angemeldete "
-                            "Google-Browser-Session. Archiv stattdessen manuell "
-                            "herunterladen und in takeout_watch_dir legen."
+                            "The response is an HTML page rather than an archive - "
+                            "this link most likely requires a signed-in Google "
+                            "browser session. Download the archive manually instead "
+                            "and place it into takeout_watch_dir."
                         )
                     proposed_name = self._proposed_filename_for_link(resp, url)
                     name = await self.hass.async_add_executor_job(
@@ -234,7 +234,7 @@ class TakeoutBackend(BackupBackend):
                     dest = watch_dir / name
                     await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
             except Exception as err:  # noqa: BLE001 - surfaced via sensor
-                stats.errors.append(f"Download-Link fehlgeschlagen ({_redact_url(url)}): {err}")
+                stats.errors.append(f"Download link failed ({_redact_url(url)}): {err}")
                 if dest is not None:
                     await self.hass.async_add_executor_job(dest.unlink, True)
                 continue
@@ -305,7 +305,7 @@ class TakeoutBackend(BackupBackend):
                 resp.raise_for_status()
                 payload = await resp.json()
             except Exception as err:  # noqa: BLE001
-                stats.errors.append(f"Drive-Abfrage fehlgeschlagen: {err}")
+                stats.errors.append(f"Drive query failed: {err}")
                 return
             files.extend(payload.get("files", []))
             page_token = payload.get("nextPageToken")
@@ -339,14 +339,13 @@ class TakeoutBackend(BackupBackend):
                 # Trusting it would silently and permanently skip backing
                 # up this archive (see issue #2): discard and re-download.
                 _LOGGER.warning(
-                    "Vorhandene Datei %s stimmt nicht mit der Drive-Dateigröße "
-                    "überein (vermutlich abgebrochener Download) - wird neu "
-                    "heruntergeladen.",
+                    "Existing file %s does not match the file size reported by "
+                    "Drive (most likely an aborted download) - downloading it again.",
                     name,
                 )
                 await self.hass.async_add_executor_job(dest.unlink)
 
-            _LOGGER.info("Lade Takeout-Archiv aus Google Drive: %s", name)
+            _LOGGER.info("Downloading Takeout archive from Google Drive: %s", name)
             try:
                 resp = await self._oauth.async_request(
                     "GET",
@@ -357,7 +356,7 @@ class TakeoutBackend(BackupBackend):
                 resp.raise_for_status()
                 await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
             except Exception as err:  # noqa: BLE001
-                stats.errors.append(f"Drive-Download {name} fehlgeschlagen: {err}")
+                stats.errors.append(f"Drive download of {name} failed: {err}")
                 await self.hass.async_add_executor_job(dest.unlink, True)
                 continue
 
@@ -417,12 +416,12 @@ class TakeoutBackend(BackupBackend):
             if resp.status != 404:  # 404 = already gone, nothing to do
                 resp.raise_for_status()
             _LOGGER.info(
-                "Takeout-Archiv in Google Drive %s: %s",
-                "gelöscht" if permanently else "in den Papierkorb verschoben",
+                "Takeout archive in Google Drive %s: %s",
+                "permanently deleted" if permanently else "moved to trash",
                 name,
             )
         except Exception as err:  # noqa: BLE001 - surfaced via sensor, file just stays in Drive
-            stats.errors.append(f"Aufräumen von {name} in Drive fehlgeschlagen: {err}")
+            stats.errors.append(f"Cleaning up {name} in Drive failed: {err}")
 
     # -- archive import (blocking, runs in executor) -------------------------
 
@@ -467,10 +466,10 @@ class TakeoutBackend(BackupBackend):
         required = int(archive_size * 1.2)
         if free < required:
             raise ValueError(
-                f"Zu wenig freier Speicherplatz zum Entpacken: {archive.name} "
-                f"benötigt ca. {required // (1024 * 1024)} MiB, verfügbar sind nur "
-                f"{free // (1024 * 1024)} MiB unter {extract_dir}. Archiv bleibt "
-                "liegen und wird beim nächsten Lauf erneut versucht."
+                f"Not enough free disk space to extract: {archive.name} needs "
+                f"about {required // (1024 * 1024)} MiB, but only "
+                f"{free // (1024 * 1024)} MiB are available under {extract_dir}. The "
+                "archive is left in place and retried on the next run."
             )
 
     @staticmethod
@@ -486,7 +485,7 @@ class TakeoutBackend(BackupBackend):
             with tarfile.open(archive, "r:gz") as tf:
                 _safe_tar_extractall(tf, dest)
         else:
-            raise ValueError(f"Unbekanntes Archivformat: {archive.name}")
+            raise ValueError(f"Unknown archive format: {archive.name}")
 
     def _import_media_file(self, media_file: Path, target_dir: str, stats: BackupStats) -> None:
         digest = sha256_file(media_file)
@@ -518,7 +517,7 @@ class TakeoutBackend(BackupBackend):
         # Fall back to whatever mtime the archive gave the extracted file
         # (usually the archive creation time, not the photo date - better
         # than nothing but logged so it's visible in the sensor error list).
-        stats_note = f"{media_file.name}: kein Sidecar-Zeitstempel gefunden, nutze Datei-mtime"
+        stats_note = f"{media_file.name}: no sidecar timestamp found, falling back to file mtime"
         _LOGGER.warning(stats_note)
         return datetime.fromtimestamp(media_file.stat().st_mtime, tz=timezone.utc)
 
@@ -557,9 +556,9 @@ def _redact_url(url: str) -> str:
     try:
         parts = urlsplit(url)
     except ValueError:
-        return "<nicht parsebare URL>"
+        return "<unparsable URL>"
     if not parts.scheme and not parts.netloc:
-        return "<nicht parsebare URL>"
+        return "<unparsable URL>"
     redacted = f"{parts.scheme}://{parts.netloc}{parts.path}"
     if parts.query:
         redacted += "?<redacted>"
@@ -603,14 +602,14 @@ def _safe_tar_extractall(tf: tarfile.TarFile, dest: Path) -> None:
     for member in tf.getmembers():
         if member.issym() or member.islnk():
             raise ValueError(
-                f"Takeout-Archiv enthält einen Symlink/Hardlink, wird abgelehnt: {member.name}"
+                f"Takeout archive contains a symlink/hardlink, rejecting it: {member.name}"
             )
         member_path = (dest / member.name).resolve()
         try:
             member_path.relative_to(dest_resolved)
         except ValueError:
             raise ValueError(
-                "Takeout-Archiv enthält einen Pfad außerhalb des Zielverzeichnisses "
-                f"(möglicher Path-Traversal-Versuch): {member.name}"
+                "Takeout archive contains a path outside the target directory "
+                f"(possible path traversal attempt): {member.name}"
             ) from None
     tf.extractall(dest)
