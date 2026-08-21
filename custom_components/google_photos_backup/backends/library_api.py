@@ -76,6 +76,11 @@ class LibraryApiBackend(BackupBackend):
     ) -> None:
         super().__init__(hass, entry, state)
         self._oauth = oauth_session
+        #: Destinations claimed by an in-flight download. See
+        #: fsutil.unique_destination() for why existence alone isn't
+        #: enough while downloads overlap.
+        self._reserved_destinations: set[Path] = set()
+        self._reserve_lock = asyncio.Lock()
 
     async def async_validate(self) -> None:
         target_dir = self.entry.data[CONF_TARGET_DIR]
