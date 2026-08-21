@@ -1,10 +1,10 @@
 """Download throttling for backends that stream HTTP responses themselves.
 
 rclone has its own native `--bwlimit` flag (see rclone_backend.py), so it
-doesn't need this. Used by library_api (small in-memory reads, one photo/
-video at a time) and takeout (large archives, streamed straight to disk -
-Takeout/Drive archives can be tens of GB, so those must never be buffered
-into memory as a whole).
+doesn't need this. Used by every backend that streams bytes itself (library_api items,
+Takeout/Drive archives). Everything streams straight to disk - both
+paths can see multi-GB payloads (4K video, split Takeout archives), so
+nothing may be buffered into memory as a whole.
 """
 from __future__ import annotations
 
@@ -38,26 +38,6 @@ class _Pacer:
         actual_elapsed = self._loop.time() - self._started
         if expected_elapsed > actual_elapsed:
             await asyncio.sleep(expected_elapsed - actual_elapsed)
-
-
-async def throttled_read(
-    resp: ClientResponse, limit_kbps: int, chunk_size: int = DOWNLOAD_CHUNK_SIZE
-) -> bytes:
-    """Read the full response body into memory, paced to `limit_kbps`
-    (KiB/s). `limit_kbps <= 0` means unlimited - reads the whole body in
-    one shot, same as a plain `await resp.read()`. Only for backends that
-    know the payload is small (single photos/videos) - see
-    `throttled_stream_to_file` for anything that could be large.
-    """
-    if limit_kbps <= 0:
-        return await resp.read()
-
-    pacer = _Pacer(limit_kbps)
-    chunks: list[bytes] = []
-    async for chunk in resp.content.iter_chunked(chunk_size):
-        chunks.append(chunk)
-        await pacer.account(len(chunk))
-    return b"".join(chunks)
 
 
 async def throttled_stream_to_file(

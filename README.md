@@ -317,8 +317,8 @@ pytest tests/ -v
 CI (`.github/workflows/ci.yml`) runs on every pull request: Python syntax +
 JSON validity, `strings.json`/translations key-sync check,
 [hassfest](https://developers.home-assistant.io/docs/creating_integration_manifest/#hassfest)
-(the official HA integration validator), `ruff` lint, and the pytest suite
-against Python 3.12 and 3.13.
+(the official HA integration validator), `ruff` lint, `mypy` type
+checking, and the pytest suite against Python 3.12 and 3.13.
 
 ### Releasing
 
@@ -334,3 +334,7 @@ manifest.json`'s `"version"` field (and/or a git tag) changing - bump it
 version-bump PR/commit before tagging a GitHub release. CI warns (doesn't
 block) if a PR touches `custom_components/` without touching
 `manifest.json`.
+
+## License
+
+[MIT](LICENSE)
