@@ -83,6 +83,16 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self.backend: BackupBackend | None = None
         self._files_backed_up_total = 0
 
+    @property
+    def state_data(self) -> dict[str, Any]:
+        """Read-only view of the persisted sync state.
+
+        Exists so diagnostics.py doesn't have to reach into _state_data
+        from another module. Callers must treat it as read-only - the
+        coordinator owns writing and persisting it.
+        """
+        return self._state_data
+
     async def async_setup(self) -> None:
         self._state_data = await self._store.async_load() or {}
         self._files_backed_up_total = self._state_data.get("files_backed_up_total", 0)

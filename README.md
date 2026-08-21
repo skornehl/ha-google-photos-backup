@@ -317,10 +317,16 @@ pytest tests/ -v
 CI (`.github/workflows/ci.yml`) runs on every pull request: Python syntax +
 JSON validity, `strings.json`/translations key-sync check,
 [hassfest](https://developers.home-assistant.io/docs/creating_integration_manifest/#hassfest)
-(the official HA integration validator), `ruff` lint, and the pytest suite
-against Python 3.12 and 3.13.
+(the official HA integration validator), `ruff` lint, `mypy` type
+checking, and the pytest suite against Python 3.12 and 3.13.
 
 ### Releasing
+
+Current version: see `manifest.json`. Released versions are tagged
+`vX.Y.Z` and published as GitHub Releases — HACS discovers updates
+through those, so a merged fix that never gets released never reaches
+anyone.
+
 
 HACS' update detection relies on `custom_components/google_photos_backup/
 manifest.json`'s `"version"` field (and/or a git tag) changing - bump it
