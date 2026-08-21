@@ -27,12 +27,37 @@ known-first-party = ["custom_components.google_photos_backup"]
 # Assistant's own sources under 3.12 rules, where PEP 696 type-parameter
 # defaults are a syntax error - it died inside homeassistant/
 # config_entries.py before ever looking at this integration.
-# Not --strict yet (see the non-blocking `typecheck` CI job); these are
-# the checks the codebase should already satisfy, so a regression in
-# them shows up as new output rather than being lost in pre-existing
-# noise.
+# Tightened towards --strict in steps rather than all at once, so each
+# batch lands with the fixes it forces (see issue #52's follow-up).
+# Everything below is currently satisfied by the codebase.
 warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
-disallow_untyped_defs = false
 ignore_missing_imports = true
+
+# Step 2: full annotation coverage. An AST scan found only two functions
+# missing annotations, both fixed alongside this change, so turning these
+# on costs nothing now and stops the gap reopening.
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+
+# Step 2: correctness checks that catch real mistakes rather than style.
+# strict_equality flags comparisons that can never be true (e.g. str vs
+# bytes); warn_return_any catches a typed function quietly degrading to
+# Any; no_implicit_reexport keeps `from .x import y` in one module from
+# silently becoming another module's public API.
+warn_return_any = true
+strict_equality = true
+no_implicit_reexport = true
+warn_unused_configs = true
+
+# Deliberately still OFF, with reasons:
+#   disallow_any_generics    - HA hands out bare generics in places we
+#                              don't control; would mean noise, not fixes.
+#   disallow_untyped_calls   - same: calling into HA/aiohttp internals
+#                              that aren't fully typed is not our defect.
+#   disallow_subclassing_any - CoordinatorEntity/ConfigFlow resolve
+#                              through HA's own typing; risk of blocking
+#                              on something we can't fix here.
+# Worth revisiting individually, each in its own PR.

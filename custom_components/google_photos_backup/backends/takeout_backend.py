@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from aiohttp import ClientResponse
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
@@ -239,7 +240,7 @@ class TakeoutBackend(BackupBackend):
             self.state.set("downloaded_takeout_links", downloaded)
 
     @staticmethod
-    def _proposed_filename_for_link(resp, url: str) -> str:
+    def _proposed_filename_for_link(resp: ClientResponse, url: str) -> str:
         """Pure string logic, no filesystem access - safe to call directly
         from a coroutine. See _resolve_unique_filename() for the part that
         actually needs to touch the filesystem."""
