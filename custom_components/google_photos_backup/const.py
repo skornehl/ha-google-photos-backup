@@ -73,6 +73,14 @@ CONF_PICKER_SESSION_ID: Final = "picker_session_id"
 CONF_PICKER_SESSION_URI: Final = "picker_session_uri"
 CONF_PICKER_SESSION_EXPIRES: Final = "picker_session_expires"
 
+# Google Photos baseUrls expire roughly 60 minutes after they are issued.
+# Listing and downloading are interleaved per page (see library_api's
+# _finish_pending_picker_session), so run length isn't the problem - but a
+# single page is 100 items, and with a low bandwidth_limit_kbps those can
+# outlive their URLs. Re-request the page once it reaches this age. Set
+# well below 60 min so an in-flight download can't tip over the edge.
+BASEURL_MAX_AGE_SECONDS: Final = 45 * 60
+
 # --- rclone backend ------------------------------------------------------------
 CONF_RCLONE_BINARY: Final = "rclone_binary"
 DEFAULT_RCLONE_BINARY: Final = "rclone"

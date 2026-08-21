@@ -28,6 +28,7 @@ backing up an existing library.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -39,6 +40,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
 
 from ..const import (
+    BASEURL_MAX_AGE_SECONDS,
     CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_PICKER_SESSION_EXPIRES,
     CONF_PICKER_SESSION_ID,
@@ -153,6 +155,7 @@ class LibraryApiBackend(BackupBackend):
                 return
 
             target_dir = self.entry.data[CONF_TARGET_DIR]
+            loop = asyncio.get_running_loop()
             page_token: str | None = None
             while True:
                 params = {"sessionId": session_id, "pageSize": 100}
@@ -163,8 +166,41 @@ class LibraryApiBackend(BackupBackend):
                 )
                 resp.raise_for_status()
                 payload = await resp.json()
-                for item in payload.get("mediaItems", []):
-                    await self._download_picker_item(item, target_dir, stats)
+                items = payload.get("mediaItems", [])
+                fetched_at = loop.time()
+
+                # A page's baseUrls all expire ~60 min after Google issued
+                # them (issue #46). Listing and downloading are already
+                # interleaved per page, so a *run* of any length is fine -
+                # but one page is 100 items, and with a low
+                # bandwidth_limit_kbps and large videos those 100 can take
+                # longer than the URLs live. Re-request the same page
+                # (same pageToken) once the URLs get close to expiry, then
+                # carry on at the same index: identical query, identical
+                # order, only the baseUrls are fresh.
+                index = 0
+                while index < len(items):
+                    if loop.time() - fetched_at > BASEURL_MAX_AGE_SECONDS:
+                        _LOGGER.info(
+                            "baseUrls dieser Seite sind bald abgelaufen - fordere "
+                            "Seite erneut an und setze bei Item %s/%s fort",
+                            index + 1,
+                            len(items),
+                        )
+                        resp = await self._oauth.async_request(
+                            "GET", f"{PICKER_API_BASE}/mediaItems", params=params
+                        )
+                        resp.raise_for_status()
+                        payload = await resp.json()
+                        items = payload.get("mediaItems", [])
+                        fetched_at = loop.time()
+                        if index >= len(items):
+                            # Shorter page than before (user changed the
+                            # selection mid-run?) - nothing left here.
+                            break
+                    await self._download_picker_item(items[index], target_dir, stats)
+                    index += 1
+
                 page_token = payload.get("nextPageToken")
                 if not page_token:
                     break
