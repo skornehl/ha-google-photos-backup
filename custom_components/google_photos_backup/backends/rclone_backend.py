@@ -37,8 +37,8 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class RcloneBackend(BackupBackend):
-    def __init__(self, hass, entry, state) -> None:
-        super().__init__(hass, entry, state)
+    def __init__(self, hass, entry, state, on_progress=None) -> None:
+        super().__init__(hass, entry, state, on_progress)
         self._proc: asyncio.subprocess.Process | None = None
 
     async def async_terminate(self) -> None:
