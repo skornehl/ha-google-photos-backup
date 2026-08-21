@@ -14,8 +14,8 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import callback
 from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.core import callback
 from homeassistant.helpers import config_entry_oauth2_flow, selector
 
 from .backends import scopes_for_backend
