@@ -108,7 +108,7 @@ async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_p
     # actually reaches the download call we want to inspect.
     await backend._sync_drive_folder(tmp_path, stats)
 
-    assert stats.errors == [], f"unerwartete Fehler: {stats.errors}"
+    assert stats.errors == [], f"unexpected errors: {stats.errors}"
 
     # First call is the files.list, second is the actual content download.
     _, download_kwargs = oauth.async_request.call_args_list[1]

@@ -117,7 +117,7 @@ async def test_services_survive_until_the_last_entry_is_unloaded(hass, tmp_path)
         assert await hass.config_entries.async_unload(first.entry_id)
         await hass.async_block_till_done()
         assert hass.services.has_service(DOMAIN, SERVICE_BACKUP_NOW), (
-            "Services dürfen nicht verschwinden, solange noch ein Entry geladen ist"
+            "Services must not disappear while another entry is still loaded"
         )
 
         assert await hass.config_entries.async_unload(second.entry_id)
@@ -131,7 +131,7 @@ async def test_validation_failure_becomes_config_entry_not_ready(hass, tmp_path)
     must surface as ConfigEntryNotReady (retry) rather than crash setup."""
     entry = _entry(hass, tmp_path)
     backend = _backend()
-    backend.async_validate = AsyncMock(side_effect=ValueError("Zielverzeichnis fehlt"))
+    backend.async_validate = AsyncMock(side_effect=ValueError("target directory missing"))
 
     with patch(
         "custom_components.google_photos_backup.coordinator.async_create_backend",

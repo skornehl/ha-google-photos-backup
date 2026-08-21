@@ -53,7 +53,7 @@ async def test_download_streams_to_disk_instead_of_buffering(monkeypatch, tmp_pa
     stats = BackupStats()
     await backend._download_picker_item(_ITEM, str(tmp_path), stats)
 
-    assert seen, "throttled_stream_to_file wurde nicht aufgerufen"
+    assert seen, "throttled_stream_to_file was not called"
     assert stats.errors == []
     assert stats.files_downloaded == 1
     assert stats.bytes_downloaded == 7
@@ -79,14 +79,14 @@ async def test_file_lands_in_the_date_folder_with_capture_mtime(monkeypatch, tmp
     await backend._download_picker_item(_ITEM, str(tmp_path), BackupStats())
 
     written = tmp_path / "2026" / "2026-08" / "clip.mp4"
-    assert written.is_file(), f"nicht gefunden: {list(tmp_path.rglob('*'))}"
+    assert written.is_file(), f"not found: {list(tmp_path.rglob('*'))}"
     # createTime 2026-08-01T00:00:00Z -> mtime must follow it, not "now"
     assert written.stat().st_mtime == 1785542400.0
 
 
 async def test_failed_download_is_recorded_and_not_marked_processed(monkeypatch, tmp_path: Path):
     async def _boom(resp, dest, hass, limit_kbps, pacer=None):
-        raise ConnectionError("abgebrochen")
+        raise ConnectionError("aborted")
 
     monkeypatch.setattr(library_api_module, "throttled_stream_to_file", _boom)
 
@@ -94,7 +94,7 @@ async def test_failed_download_is_recorded_and_not_marked_processed(monkeypatch,
     stats = BackupStats()
     await backend._download_picker_item(_ITEM, str(tmp_path), stats)
 
-    assert any("fehlgeschlagen" in e for e in stats.errors)
+    assert any("download failed" in e for e in stats.errors)
     assert stats.files_downloaded == 0
     # Not recorded -> retried on the next run rather than silently lost.
     assert backend.state.get("processed_ids", []) == []

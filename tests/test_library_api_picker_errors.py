@@ -66,7 +66,7 @@ async def test_listing_failure_is_recorded_not_raised():
 
     await backend._finish_pending_picker_session(stats)  # must not raise
 
-    assert any("fehlgeschlagen" in err for err in stats.errors)
+    assert any("failed" in err for err in stats.errors)
     # Session wasn't cleared - the caller should get another chance next run.
     assert backend.state.get(CONF_PICKER_SESSION_ID) == "sess123"
 
@@ -78,7 +78,7 @@ async def test_session_status_failure_is_recorded_not_raised():
 
     await backend._finish_pending_picker_session(stats)
 
-    assert any("fehlgeschlagen" in err for err in stats.errors)
+    assert any("failed" in err for err in stats.errors)
 
 
 async def test_session_delete_failure_is_recorded_not_raised():
@@ -94,7 +94,7 @@ async def test_session_delete_failure_is_recorded_not_raised():
 
     await backend._finish_pending_picker_session(stats)
 
-    assert any("konnte nicht aufgeräumt werden" in err for err in stats.errors)
+    assert any("Could not clean up" in err for err in stats.errors)
     # Cleanup failed, so the session must NOT have been cleared - the next
     # run needs to see it again (harmless: Google either 404s it by then,
     # or every item gets skipped via processed_ids).

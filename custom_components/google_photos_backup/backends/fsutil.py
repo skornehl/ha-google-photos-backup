@@ -26,14 +26,14 @@ def ensure_target_dir(target_dir: str) -> None:
     """
     path = Path(target_dir)
     if not path.is_dir():
-        raise ValueError(f"Zielverzeichnis existiert nicht oder ist kein Ordner: {target_dir}")
+        raise ValueError(f"Target directory does not exist or is not a directory: {target_dir}")
     probe = path / ".google_photos_backup_write_test"
     try:
         probe.write_bytes(b"")
         probe.unlink()
     except OSError as err:
         raise ValueError(
-            f"Zielverzeichnis ist nicht beschreibbar: {target_dir} ({err})"
+            f"Target directory is not writable: {target_dir} ({err})"
         ) from err
 
 
@@ -46,7 +46,7 @@ def sha256_file(path: Path) -> str:
 
 
 def dest_dir_for_date(target_dir: str, taken_at: datetime) -> Path:
-    """JJJJ/JJJJ-MM/ layout, e.g. 2026/2026-08/."""
+    """YYYY/YYYY-MM/ layout, e.g. 2026/2026-08/."""
     return Path(target_dir) / f"{taken_at.year:04d}" / f"{taken_at.year:04d}-{taken_at.month:02d}"
 
 

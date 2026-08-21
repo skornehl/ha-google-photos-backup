@@ -68,7 +68,7 @@ class LastSyncSensor(_BaseSensor):
 
 class FilesBackedUpSensor(_BaseSensor):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_native_unit_of_measurement = "Dateien"
+    _attr_native_unit_of_measurement = "files"
     _attr_icon = "mdi:image-multiple"
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
@@ -83,11 +83,11 @@ class FilesBackedUpSensor(_BaseSensor):
         if not self.coordinator.data:
             return {}
         return {
-            "letzter_lauf_heruntergeladen": self.coordinator.data.last_run_files_downloaded,
-            "letzter_lauf_uebersprungen": self.coordinator.data.last_run_files_skipped,
+            "last_run_downloaded": self.coordinator.data.last_run_files_downloaded,
+            "last_run_skipped": self.coordinator.data.last_run_files_skipped,
             # Distinguishes "quiet because idle" from "quiet because a long
             # import is still running" (issue #21).
-            "lauf_aktiv": self.coordinator.data.in_progress,
+            "run_active": self.coordinator.data.in_progress,
         }
 
 
@@ -100,7 +100,7 @@ class LastErrorSensor(_BaseSensor):
     @property
     def native_value(self) -> str:
         if not self.coordinator.data or not self.coordinator.data.last_run_errors:
-            return "Keine"
+            return "None"
         first = self.coordinator.data.last_run_errors[0]
         return first[:255]
 
@@ -108,7 +108,7 @@ class LastErrorSensor(_BaseSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         if not self.coordinator.data:
             return {}
-        return {"alle_fehler": self.coordinator.data.last_run_errors}
+        return {"all_errors": self.coordinator.data.last_run_errors}
 
 
 class FreeSpaceSensor(_BaseSensor):

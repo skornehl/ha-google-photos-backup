@@ -27,7 +27,7 @@ def test_raises_a_clear_error_when_space_is_short(tmp_path: Path, monkeypatch):
     archive.write_bytes(b"x" * 10_000)
     monkeypatch.setattr(takeout_module.shutil, "disk_usage", lambda _p: _Usage(10_000, 9_000, 500))
 
-    with pytest.raises(ValueError, match="Zu wenig freier Speicherplatz"):
+    with pytest.raises(ValueError, match="Not enough free disk space"):
         TakeoutBackend._check_free_space(archive, tmp_path)
 
 
@@ -41,7 +41,7 @@ def test_error_mentions_the_archive_and_that_it_will_be_retried(tmp_path: Path, 
 
     message = str(excinfo.value)
     assert "takeout-20260801-001.zip" in message
-    assert "erneut versucht" in message
+    assert "retried on the next run" in message
 
 
 def test_stays_out_of_the_way_when_it_cannot_measure(tmp_path: Path):

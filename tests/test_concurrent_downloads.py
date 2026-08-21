@@ -80,7 +80,7 @@ async def test_one_pacer_shared_across_workers_keeps_the_limit_total():
 
     # 10 x 100 KiB at 100 KiB/s == ~10s of pacing, minus the first chunk
     # which needs no delay.
-    assert slept >= 8.0, f"zu wenig gedrosselt: {slept}s"
+    assert slept >= 8.0, f"not throttled enough: {slept}s"
 
 
 async def test_unlimited_pacer_never_sleeps():
@@ -101,7 +101,7 @@ def test_unique_destination_skips_reserved_but_nonexistent_paths(tmp_path: Path)
     second = unique_destination(tmp_path, "IMG_0001.jpg", reserved)
 
     assert first.name == "IMG_0001.jpg"
-    assert second != first, "zweiter Worker bekam denselben Pfad"
+    assert second != first, "second worker was handed the same path"
     assert second.name == "IMG_0001_1.jpg"
 
 
@@ -138,7 +138,7 @@ async def test_two_same_named_items_do_not_overwrite_each_other(monkeypatch, tmp
     written = sorted(p.name for p in (tmp_path / "2026" / "2026-08").iterdir())
     assert written == ["IMG_0001.jpg", "IMG_0001_1.jpg"], written
     assert stats.files_downloaded == 2
-    assert backend._reserved_destinations == set(), "Reservierungen nicht freigegeben"
+    assert backend._reserved_destinations == set(), "reservations were not released"
 
 
 async def test_reservation_is_released_even_when_the_download_fails(monkeypatch, tmp_path: Path):
@@ -151,8 +151,8 @@ async def test_reservation_is_released_even_when_the_download_fails(monkeypatch,
     stats = BackupStats()
     await backend._download_picker_item(_item("a", "x.jpg"), str(tmp_path), stats)
 
-    assert stats.errors, "Fehler nicht gemeldet"
-    assert backend._reserved_destinations == set(), "Reservierung nach Fehler nicht freigegeben"
+    assert stats.errors, "error was not reported"
+    assert backend._reserved_destinations == set(), "reservation not released after an error"
 
 
 # -- 3. concurrency configuration ------------------------------------------

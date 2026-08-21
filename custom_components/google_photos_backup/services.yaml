@@ -1,29 +1,28 @@
 backup_now:
-  name: Backup jetzt ausführen
+  name: Run backup now
   description: >-
-    Startet sofort einen Backup-Lauf für den angegebenen Google Photos
-    Backup Config-Entry, unabhängig vom konfigurierten Zeitintervall.
+    Immediately starts a backup run for the given Google Photos Backup
+    config entry, regardless of the configured interval.
   fields:
     config_entry_id:
-      name: Config Entry
-      description: Die zu synchronisierende Google Photos Backup Instanz.
+      name: Config entry
+      description: The Google Photos Backup instance to sync.
       required: true
       selector:
         config_entry:
           integration: google_photos_backup
 
 start_picker_session:
-  name: Foto-Auswahl starten (Picker)
+  name: Start photo picker session
   description: >-
-    Nur für das library_api-Backend: erzeugt eine neue Google Photos
-    Picker-Session und schickt eine Benachrichtigung mit dem Link, über
-    den Fotos/Videos aus der bestehenden Bibliothek ausgewählt werden
-    können. Das Backup dieser Auswahl läuft danach automatisch beim
-    nächsten Sync (oder per backup_now).
+    library_api backend only: creates a new Google Photos Picker session
+    and sends a notification containing the link used to select photos and
+    videos from the existing library. Whatever is selected there is backed
+    up on the next sync (or via backup_now).
   fields:
     config_entry_id:
-      name: Config Entry
-      description: Die Google Photos Backup Instanz mit Backend "library_api".
+      name: Config entry
+      description: The Google Photos Backup instance with backend "library_api".
       required: true
       selector:
         config_entry:

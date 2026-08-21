@@ -60,7 +60,7 @@ async def test_hanging_process_is_killed_after_timeout(hass, monkeypatch):
         stats = await backend.async_run_backup()
 
     assert fake_proc.killed
-    assert any("abgebrochen" in err for err in stats.errors)
+    assert any("killed after" in err for err in stats.errors)
     # Cleared after timeout handling, so a later async_terminate() call
     # (e.g. from unload racing right after) doesn't try to kill it again.
     assert backend._proc is None
