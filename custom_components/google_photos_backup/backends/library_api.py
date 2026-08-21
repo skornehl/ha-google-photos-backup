@@ -28,9 +28,11 @@ backing up an existing library.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -38,6 +40,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
 
 from ..const import (
+    BASEURL_MAX_AGE_SECONDS,
     CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_PICKER_SESSION_EXPIRES,
     CONF_PICKER_SESSION_ID,
@@ -51,7 +54,7 @@ from ..const import (
 )
 from .base import BackupBackend, BackupStats, SyncStateStore
 from .fsutil import dest_dir_for_date, ensure_target_dir, unique_destination
-from .throttle import throttled_read
+from .throttle import throttled_stream_to_file
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -152,6 +155,7 @@ class LibraryApiBackend(BackupBackend):
                 return
 
             target_dir = self.entry.data[CONF_TARGET_DIR]
+            loop = asyncio.get_running_loop()
             page_token: str | None = None
             while True:
                 params = {"sessionId": session_id, "pageSize": 100}
@@ -162,8 +166,41 @@ class LibraryApiBackend(BackupBackend):
                 )
                 resp.raise_for_status()
                 payload = await resp.json()
-                for item in payload.get("mediaItems", []):
-                    await self._download_picker_item(item, target_dir, stats)
+                items = payload.get("mediaItems", [])
+                fetched_at = loop.time()
+
+                # A page's baseUrls all expire ~60 min after Google issued
+                # them (issue #46). Listing and downloading are already
+                # interleaved per page, so a *run* of any length is fine -
+                # but one page is 100 items, and with a low
+                # bandwidth_limit_kbps and large videos those 100 can take
+                # longer than the URLs live. Re-request the same page
+                # (same pageToken) once the URLs get close to expiry, then
+                # carry on at the same index: identical query, identical
+                # order, only the baseUrls are fresh.
+                index = 0
+                while index < len(items):
+                    if loop.time() - fetched_at > BASEURL_MAX_AGE_SECONDS:
+                        _LOGGER.info(
+                            "baseUrls dieser Seite sind bald abgelaufen - fordere "
+                            "Seite erneut an und setze bei Item %s/%s fort",
+                            index + 1,
+                            len(items),
+                        )
+                        resp = await self._oauth.async_request(
+                            "GET", f"{PICKER_API_BASE}/mediaItems", params=params
+                        )
+                        resp.raise_for_status()
+                        payload = await resp.json()
+                        items = payload.get("mediaItems", [])
+                        fetched_at = loop.time()
+                        if index >= len(items):
+                            # Shorter page than before (user changed the
+                            # selection mid-run?) - nothing left here.
+                            break
+                    await self._download_picker_item(items[index], target_dir, stats)
+                    index += 1
+
                 page_token = payload.get("nextPageToken")
                 if not page_token:
                     break
@@ -244,35 +281,40 @@ class LibraryApiBackend(BackupBackend):
             taken_at = datetime.now(timezone.utc)
 
         limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
+
+        # Reserve the destination name *before* downloading: the response
+        # is streamed straight to disk rather than buffered in memory
+        # (see issue #45 - Google Photos serves multi-GB 4K videos through
+        # this same path, and HA commonly runs on 2-4 GB hardware where
+        # buffering one would OOM the whole process, not just this
+        # integration).
+        def _reserve_destination() -> Path:
+            dest_dir = dest_dir_for_date(target_dir, taken_at)
+            return unique_destination(dest_dir, filename)
+
+        dest = await self.hass.async_add_executor_job(_reserve_destination)
+
         try:
             resp = await self._oauth.async_request(
                 "GET", base_url + suffix, timeout=DOWNLOAD_TIMEOUT
             )
             resp.raise_for_status()
-            raw = await throttled_read(resp, limit_kbps)
+            # Handles the .part-file + atomic rename itself (issue #9).
+            size = await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
         except Exception as err:  # noqa: BLE001 - surfaced to the user via sensor
             stats.errors.append(f"{filename}: Download fehlgeschlagen ({err})")
+            # unique_destination() created the date folder and reserved the
+            # name; throttled_stream_to_file() already removed its own
+            # .part file, so nothing is left behind but the (possibly
+            # empty) directory, which the next item will reuse.
             return
 
-        def _write() -> int:
-            dest_dir = dest_dir_for_date(target_dir, taken_at)
-            dest = unique_destination(dest_dir, filename)
-            # Write to a .part sibling and only rename onto the final name
-            # once fully written - a process kill mid-write can then never
-            # leave a truncated file sitting at the name the rest of the
-            # code treats as "this photo is done" (see issue #9).
-            tmp_path = dest.with_name(dest.name + ".part")
-            try:
-                tmp_path.write_bytes(raw)
-                ts = taken_at.timestamp()
-                os.utime(tmp_path, (ts, ts))
-                os.replace(tmp_path, dest)
-            except BaseException:
-                tmp_path.unlink(missing_ok=True)
-                raise
-            return len(raw)
+        def _set_mtime() -> None:
+            ts = taken_at.timestamp()
+            os.utime(dest, (ts, ts))
 
-        size = await self.hass.async_add_executor_job(_write)
+        await self.hass.async_add_executor_job(_set_mtime)
+
         processed_ids.append(item_id)
         self.state.set("processed_ids", processed_ids)
         stats.files_downloaded += 1

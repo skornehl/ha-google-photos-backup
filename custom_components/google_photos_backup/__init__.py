@@ -12,6 +12,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .backends.library_api import LibraryApiBackend
 from .const import (
+    CONFIG_ENTRY_VERSION,
     DOMAIN,
     PLATFORMS,
     SERVICE_BACKUP_NOW,
@@ -42,6 +43,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_register_services(hass)
     return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Bring an existing config entry up to the current schema.
+
+    Currently a no-op: the schema is still at VERSION 1 (see
+    config_flow.GooglePhotosBackupFlowHandler) and every change so far has
+    been additive - new options are read through `.get()` with defaults,
+    so older entries keep working untouched.
+
+    It exists anyway because the moment a *non*-additive change is needed
+    (renaming a key, changing a value's shape), there has to be somewhere
+    to put the migration - and by then it's too late to add the mechanism,
+    since entries written by the older version are already on disk. For
+    this integration that's worse than usual: a broken entry also loses
+    the persisted sync state (processed_ids / processed_hashes /
+    processed_archives), which means re-downloading the entire library.
+
+    Returning False on an unknown (newer) version is deliberate: that
+    happens when a user downgrades the integration, and refusing to load
+    is far safer than letting old code write a schema it doesn't
+    understand.
+    """
+    if entry.version == CONFIG_ENTRY_VERSION:
+        return True
+
+    if entry.version > CONFIG_ENTRY_VERSION:
+        _LOGGER.error(
+            "Config-Entry hat Version %s, diese Version der Integration kennt "
+            "nur bis %s - vermutlich wurde die Integration herabgestuft. "
+            "Entry wird nicht geladen, um die gespeicherten Daten nicht zu "
+            "beschädigen.",
+            entry.version,
+            CONFIG_ENTRY_VERSION,
+        )
+        return False
+
+    _LOGGER.error(
+        "Kein Migrationspfad von Config-Entry-Version %s auf %s",
+        entry.version,
+        CONFIG_ENTRY_VERSION,
+    )
+    return False
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
