@@ -41,7 +41,7 @@
       },
       "takeout_drive_choice": {
         "title": "Google Drive sync?",
-        "description": "Optionally poll a Google Drive location directly for new Takeout export archives (as delivered by Takeout's own 'Scheduled exports' feature), download them in automatically, and optionally delete them from Drive again once imported - instead of relying on a separate external sync step into the watch directory. Needs its own Google sign-in granting read access to your whole Drive plus permission to manage (trash/delete) file metadata - the delete itself stays off by default, see the next step. Requires the Drive API enabled on the same Google Cloud project used for library_api - see README.",
+        "description": "Optionally poll a Google Drive location directly for new Takeout export archives (as delivered by Takeout's own 'Scheduled exports' feature), download them in automatically, and optionally delete them from Drive again once imported - instead of relying on a separate external sync step into the watch directory. Needs its own Google sign-in granting read access to your whole Drive plus permission to manage (trash/delete) file metadata - the delete itself stays off by default, see the next step. Requires the Drive API enabled on the same Google Cloud project used for library_api - see README. Quota note: the *first* scheduled export is a full copy of the library, so Drive needs room for all of it once; exports after that are incremental (Google Photos, since June 2026) and usually only a few GB.",
         "data": {
           "takeout_drive_sync": "Enable Google Drive sync"
         }

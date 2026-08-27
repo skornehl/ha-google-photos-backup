@@ -307,9 +307,14 @@ quota isn't enough:
    and place them into `takeout_watch_dir` if a link needs a browser
    session this integration can't provide.
 3. **Only then** switch to "Scheduled exports" (Drive), optionally with
-   Drive sync enabled (see above) - according to Google, that then only
-   transfers *new/changed* data since the last export, so for most
-   libraries just a few GB per run instead of the full size.
+   Drive sync enabled (see above). Since June 2026 Google Photos exports
+   are **incremental**: the first run exports the whole library, every run
+   after that contains only what was added or changed since the previous
+   successful export - for most libraries a few GB per run instead of the
+   full size. A schedule produces up to six exports, one every two months
+   for a year, after which it has to be set up again. Incremental mode
+   requires Google Photos to be the **only** product selected in the
+   export; it does not apply to other Takeout data types.
 
 Google Takeout doesn't allow selecting by album or time range for
 Photos - a one-time export is always the complete library.
