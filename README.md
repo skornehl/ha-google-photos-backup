@@ -50,7 +50,7 @@ without touching the coordinator/sensors/services.
 | Coverage of an existing library | ❌ only what this integration itself uploads + manual per-session Picker selection | ❌ since March 2025, only what rclone itself has uploaded | ✅ complete (that's the whole point of Takeout) |
 | Automation level | Medium (Picker requires manual user interaction per selection session) | High (unattended, but empty of content for existing photos) | Medium (Google auto-generates exports every 2 months, but delivery into the watch directory is a separate step) |
 | EXIF/metadata fidelity | Original file straight from Google (`=d`/`=dv`) | Original file straight from Google | File + JSON sidecar; capture date/mtime is taken from the JSON, embedded EXIF is not rewritten |
-| Setup effort | Google Cloud project + OAuth consent screen + application credentials | rclone binary + `rclone.conf` + OAuth in the rclone context | Just a watch directory; manual Google Takeout export or "scheduled exports" |
+| Setup effort | Google Cloud project + Google Auth Platform config + application credentials | rclone binary + `rclone.conf` + OAuth in the rclone context | Just a watch directory; manual Google Takeout export or "scheduled exports" |
 | Dependency on external binaries | None | `rclone` must be provided separately (not included in HA OS) | None |
 | Resilience to future Google API changes | Low (API surface can be restricted further at any time) | Low (same API under the hood) | High (Takeout is a user right under GDPR/data portability, not an API product Google can arbitrarily cut off) |
 
@@ -103,18 +103,54 @@ connection for hours.
 
 ### Backend 1: library_api (Google Cloud OAuth)
 
+> **Console UI note (verified 2026-08-27).** Google reorganised the Cloud
+> Console: the single *"OAuth consent screen"* page older guides refer to no
+> longer exists. It is now **Google Auth Platform**, split across sub-pages -
+> *Branding* (app name, support email, authorised domains), *Audience* (user
+> type, test users, publishing status), *Data access* (scopes), *Clients*
+> (OAuth client IDs) and *Verification center*. The steps below use the
+> current names.
+
 1. Create a project in the [Google Cloud Console](https://console.cloud.google.com/),
-   enable the **Photos Library API** and **Photos Picker API**.
-2. Configure the OAuth consent screen (External, test user = your Google
-   account, as long as the app isn't verified).
-3. Create an OAuth client ID (type "Web Application"), enter the redirect
-   URI Home Assistant suggests under Settings → Application Credentials as
-   the redirect URI (`https://YOUR_HA/auth/external/callback`).
-4. In HA: Settings → Application Credentials → Add → domain
-   `google_photos_backup`, enter client ID/secret.
-5. Start the config flow, choose backend `library_api`, authorize your
+   then under **APIs & Services → Library** enable both **Google Photos
+   Library API** and **Google Photos Picker API** (that is how they are
+   listed; the service names are `photoslibrary.googleapis.com` and
+   `photospicker.googleapis.com`).
+2. **Google Auth Platform → Branding**: fill in app name, user support email
+   and an authorised domain. Do not upload a logo if you intend to stay in
+   testing - a logo forces the app into Google's verification process.
+3. **Google Auth Platform → Audience**: user type stays **External** for
+   personal Google accounts ("Internal" requires a Workspace organisation).
+   Add your own Google account under **Test users** - while the app is in
+   *Testing*, only listed accounts can complete the OAuth flow (max. 100).
+4. **Google Auth Platform → Data access**: add the scopes this backend needs.
+   Categories Google assigns them, which decide whether verification is
+   required:
+
+   | Scope | Category |
+   |---|---|
+   | `photoslibrary.readonly.appcreateddata` | non-sensitive |
+   | `photospicker.mediaitems.readonly` | sensitive |
+   | `drive.readonly` (only for Takeout + Drive sync) | **restricted** |
+
+5. **Google Auth Platform → Clients → Create client**, application type
+   **Web application**. Under *Authorised redirect URIs* add the URI Home
+   Assistant shows on its Application Credentials page - with My Home
+   Assistant that is `https://my.home-assistant.io/redirect/oauth`; a direct
+   `https://YOUR_HA/auth/external/callback` works too if you don't use the My
+   redirect. Google notes changes can take minutes to hours to take effect.
+6. Leave the publishing status on **Testing**. The *Verification center* then
+   states that no verification is required - this holds even for the
+   restricted Drive scope, which is what keeps a private single-user setup out
+   of Google's review process entirely. Publishing the app would trigger a
+   review that, for restricted scopes, can demand a privacy policy and a demo
+   video.
+7. In HA: Settings → Application Credentials → Add → domain
+   `google_photos_backup`, enter client ID/secret. A client ID ends in
+   `.apps.googleusercontent.com`; the secret starts with `GOCSPX-`.
+8. Start the config flow, choose backend `library_api`, authorize your
    Google account, set the target directory + interval.
-6. To actually get photos from your **existing** library: call the
+9. To actually get photos from your **existing** library: call the
    `google_photos_backup.start_picker_session` service, open the link from
    the notification, select photos/albums. The next sync (or
    `backup_now`) downloads the selection.
@@ -141,6 +177,12 @@ through this exact rclone remote - see rclone docs
 (`rclone can only download photos it uploaded`).
 
 ### Backend 3: Takeout (recommended)
+
+> **No Google Cloud project needed.** Plain Takeout does not use OAuth at all -
+> the config flow asks about Drive sync *before* deciding whether to route
+> through a Google sign-in, and answering "no" skips it entirely. Everything in
+> "Backend 1" above (Cloud project, consent screen, client ID, scopes) is
+> irrelevant unless you enable Drive sync further down.
 
 1. Open [Google Takeout](https://takeout.google.com/), select only "Google
    Photos", export format `.zip`, limit size as needed (smaller files are
@@ -196,7 +238,7 @@ straight into `takeout_watch_dir`.
 
 0. In the same Google Cloud project as step 1 above, enable the **Google
    Drive API**, and add both the `drive.readonly` and `drive.metadata`
-   scopes to the OAuth consent screen's scope list (Data access) - same
+   scopes under **Google Auth Platform → Data access** - same
    place you added the Photos scopes for `library_api`, if you've set
    that up. If you're using `takeout` standalone, you still need a Google
    Cloud project + OAuth client (Application Credentials) for this,
@@ -265,9 +307,14 @@ quota isn't enough:
    and place them into `takeout_watch_dir` if a link needs a browser
    session this integration can't provide.
 3. **Only then** switch to "Scheduled exports" (Drive), optionally with
-   Drive sync enabled (see above) - according to Google, that then only
-   transfers *new/changed* data since the last export, so for most
-   libraries just a few GB per run instead of the full size.
+   Drive sync enabled (see above). Since June 2026 Google Photos exports
+   are **incremental**: the first run exports the whole library, every run
+   after that contains only what was added or changed since the previous
+   successful export - for most libraries a few GB per run instead of the
+   full size. A schedule produces up to six exports, one every two months
+   for a year, after which it has to be set up again. Incremental mode
+   requires Google Photos to be the **only** product selected in the
+   export; it does not apply to other Takeout data types.
 
 Google Takeout doesn't allow selecting by album or time range for
 Photos - a one-time export is always the complete library.

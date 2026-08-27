@@ -41,7 +41,7 @@
       },
       "takeout_drive_choice": {
         "title": "Google-Drive-Synchronisierung?",
-        "description": "Optional: einen Google-Drive-Ort direkt nach neuen Takeout-Exportarchiven abfragen (wie sie Takeouts eigene 'Geplante Exporte' liefern), automatisch herunterladen und optional nach dem Import wieder aus Drive löschen - statt auf einen separaten externen Sync-Schritt ins Watch-Verzeichnis angewiesen zu sein. Braucht eine eigene Google-Anmeldung mit Lesezugriff auf dein gesamtes Drive plus Berechtigung, Datei-Metadaten zu verwalten (Papierkorb/Löschen) - das Löschen selbst ist standardmäßig aus, siehe nächster Schritt. Erfordert die aktivierte Drive API im selben Google-Cloud-Projekt wie library_api - siehe README.",
+        "description": "Optional: einen Google-Drive-Ort direkt nach neuen Takeout-Exportarchiven abfragen (wie sie Takeouts eigene 'Geplante Exporte' liefern), automatisch herunterladen und optional nach dem Import wieder aus Drive löschen - statt auf einen separaten externen Sync-Schritt ins Watch-Verzeichnis angewiesen zu sein. Braucht eine eigene Google-Anmeldung mit Lesezugriff auf dein gesamtes Drive plus Berechtigung, Datei-Metadaten zu verwalten (Papierkorb/Löschen) - das Löschen selbst ist standardmäßig aus, siehe nächster Schritt. Erfordert die aktivierte Drive API im selben Google-Cloud-Projekt wie library_api - siehe README. Hinweis zum Speicherplatz: Der *erste* geplante Export ist eine vollständige Kopie der Mediathek, Drive braucht dafür einmalig entsprechend Platz. Alle weiteren Exporte sind inkrementell (Google Fotos, seit Juni 2026) und meist nur wenige GB.",
         "data": {
           "takeout_drive_sync": "Google-Drive-Synchronisierung aktivieren"
         }
