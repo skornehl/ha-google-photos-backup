@@ -203,7 +203,11 @@ through this exact rclone remote - see rclone docs
 5. The integration unpacks every new archive, files media
    chronologically into `YYYY/YYYY-MM/` based on the `<file>.json`
    sidecar (`photoTakenTime`), and skips already-imported files
-   (SHA-256 hash comparison, consistent across backends).
+   (SHA-256 hash comparison, consistent across backends). Every file in
+   the archive is imported except Takeout's own metadata (`.json`
+   sidecars, `archive_browser.html`) - RAW, `.mkv`, `.webm`, `.tif`,
+   motion-photo `.mp` and any other format included, not just common
+   JPEG/MP4 types.
 
 #### Download links
 
