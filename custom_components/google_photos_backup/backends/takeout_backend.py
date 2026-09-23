@@ -87,10 +87,18 @@ from .throttle import throttled_stream_to_file
 
 _LOGGER = logging.getLogger(__name__)
 
-MEDIA_SUFFIXES = {
-    ".jpg", ".jpeg", ".png", ".heic", ".gif", ".webp",
-    ".mp4", ".mov", ".m4v", ".avi", ".3gp",
-}
+# Takeout's own non-media files: JSON sidecars (per item, per album
+# `metadata.json`, `print-subscriptions.json`, ...) and the
+# `archive_browser.html` index at the archive root. Everything else in a
+# Google Photos export is user content and gets imported.
+#
+# Deliberately a blocklist, not a media allowlist: an allowlist silently
+# drops every format nobody thought of (RAW like .dng/.cr2/.nef, .mkv,
+# .webm, .tif, .avif, .heif, .mts, motion-photo .mp, ...), and because the
+# archive is marked processed afterwards, a later run never picks those
+# files up again. For a backup, importing one stray file too many is
+# harmless; losing a file without a trace is not.
+TAKEOUT_METADATA_SUFFIXES = frozenset({".json", ".html", ".htm"})
 SIDECAR_PATTERNS = (
     "{name}.json",
     "{name}.suppl.json",
@@ -431,9 +439,7 @@ class TakeoutBackend(BackupBackend):
             self._check_free_space(archive, tmp_path)
             self._extract(archive, tmp_path)
             media_files = [
-                p
-                for p in tmp_path.rglob("*")
-                if p.is_file() and p.suffix.lower() in MEDIA_SUFFIXES
+                p for p in tmp_path.rglob("*") if p.is_file() and _is_takeout_content(p)
             ]
             for media_file in media_files:
                 self._import_media_file(media_file, target_dir, stats)
@@ -542,6 +548,13 @@ class TakeoutBackend(BackupBackend):
                 best_len = prefix_len
                 best = candidate
         return best
+
+
+def _is_takeout_content(path: Path) -> bool:
+    """True for anything in an extracted archive that should be backed up -
+    i.e. everything except Takeout's own metadata files, see
+    TAKEOUT_METADATA_SUFFIXES."""
+    return path.suffix.lower() not in TAKEOUT_METADATA_SUFFIXES
 
 
 def _redact_url(url: str) -> str:
