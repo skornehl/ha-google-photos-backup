@@ -111,6 +111,22 @@ CONF_TAKEOUT_DELETE_AFTER_IMPORT: Final = "takeout_delete_after_import"
 DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT: Final = False
 TAKEOUT_ARCHIVE_SUFFIXES: Final = (".zip", ".tgz", ".tar.gz")
 
+# Optional: a pasted cURL/PowerShell "copy as" command captured from the
+# Download button on takeout.google.com's "Manage exports" page. Unlike
+# a one-time emailed download link, that request is authenticated by the
+# browser's own session cookie, which stays valid for repeat use for
+# about an hour - long enough to fetch every split archive in an export
+# with the one captured cookie. See backends/curl_session.py, and its
+# credit to clivewatts/takeout_downloader_script, for how this differs
+# from the removed takeout_download_links feature.
+CONF_TAKEOUT_CURL_SESSION: Final = "takeout_curl_session"
+# Safety cap on how many sequential archive numbers to try after the
+# captured one, in case cookie/pattern parsing goes wrong in some way
+# that doesn't trigger the normal "3 consecutive 404s" stop condition -
+# matches the reference project's default FILE_COUNT.
+CONF_TAKEOUT_CURL_MAX_FILES: Final = "takeout_curl_max_files"
+DEFAULT_TAKEOUT_CURL_MAX_FILES: Final = 100
+
 # Optional: continuous alternative to manually placing archives in
 # takeout_watch_dir - polls a Google Drive location (My Drive root, or one
 # folder) for new "takeout-*" archives (as delivered by Takeout's own

@@ -32,6 +32,8 @@ from .const import (
     CONF_RCLONE_REMOTE_NAME,
     CONF_RCLONE_SOURCE_PATH,
     CONF_SYNC_INTERVAL_MINUTES,
+    CONF_TAKEOUT_CURL_MAX_FILES,
+    CONF_TAKEOUT_CURL_SESSION,
     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
     CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
@@ -45,6 +47,7 @@ from .const import (
     DEFAULT_RCLONE_BINARY,
     DEFAULT_RCLONE_SOURCE_PATH,
     DEFAULT_SYNC_INTERVAL_MINUTES,
+    DEFAULT_TAKEOUT_CURL_MAX_FILES,
     DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT,
     DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
@@ -57,6 +60,8 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_MULTILINE_TEXT = selector.selector({"text": {"multiline": True}})
 
 
 def _common_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -95,6 +100,14 @@ def _takeout_schema(*, drive_enabled: bool, defaults: dict[str, Any] | None = No
                 CONF_TAKEOUT_DELETE_AFTER_IMPORT,
                 default=defaults.get(CONF_TAKEOUT_DELETE_AFTER_IMPORT, DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT),
             ): bool,
+            vol.Optional(
+                CONF_TAKEOUT_CURL_SESSION,
+                default=defaults.get(CONF_TAKEOUT_CURL_SESSION, ""),
+            ): _MULTILINE_TEXT,
+            vol.Optional(
+                CONF_TAKEOUT_CURL_MAX_FILES,
+                default=defaults.get(CONF_TAKEOUT_CURL_MAX_FILES, DEFAULT_TAKEOUT_CURL_MAX_FILES),
+            ): vol.All(vol.Coerce(int), vol.Range(min=1)),
         }
     )
     if drive_enabled:
@@ -359,6 +372,17 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
             ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY)),
         }
         if self.config_entry.data.get(CONF_BACKEND) == BACKEND_TAKEOUT:
+            schema_dict[
+                vol.Optional(
+                    CONF_TAKEOUT_CURL_SESSION, default=_current(CONF_TAKEOUT_CURL_SESSION, "")
+                )
+            ] = _MULTILINE_TEXT
+            schema_dict[
+                vol.Optional(
+                    CONF_TAKEOUT_CURL_MAX_FILES,
+                    default=_current(CONF_TAKEOUT_CURL_MAX_FILES, DEFAULT_TAKEOUT_CURL_MAX_FILES),
+                )
+            ] = vol.All(vol.Coerce(int), vol.Range(min=1))
             if self.config_entry.data.get(CONF_TAKEOUT_DRIVE_SYNC):
                 schema_dict[
                     vol.Optional(
