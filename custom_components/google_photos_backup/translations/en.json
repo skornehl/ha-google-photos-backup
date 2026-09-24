@@ -161,5 +161,21 @@
         }
       }
     }
+  },
+  "issues": {
+    "curl_session_expired": {
+      "title": "Google Photos Backup: Takeout session expired",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Paste a fresh cURL/PowerShell command",
+            "description": "The captured browser session for \"{title}\" used to download Takeout archives has expired (it's a real Google session cookie, only valid for about an hour). Open takeout.google.com's \"Manage exports\" page, click Download, copy the request as cURL or PowerShell from DevTools' Network tab, and paste it below. Already-downloaded archives are kept - the next run resumes from where this one stopped.",
+            "data": {
+              "takeout_curl_session": "cURL / PowerShell command"
+            }
+          }
+        }
+      }
+    }
   }
 }
