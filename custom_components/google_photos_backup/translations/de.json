@@ -55,7 +55,9 @@
           "bandwidth_limit_kbps": "Bandbreitenlimit (KiB/s, 0 = unbegrenzt)",
           "takeout_watch_dir": "Watch-Verzeichnis für Takeout-Archive",
           "takeout_delete_after_import": "Archiv nach erfolgreichem Import löschen",
-          "download_concurrency": "Parallele Downloads (1-8)"
+          "download_concurrency": "Parallele Downloads (1-8)",
+          "takeout_curl_session": "Erfasste Sitzung (cURL/PowerShell, optional) - siehe README „cURL-Sitzung“",
+          "takeout_curl_max_files": "Maximale Archivnummer (Sicherheitsgrenze)"
         }
       },
       "takeout_drive_options": {
@@ -70,7 +72,9 @@
           "takeout_drive_folder_id": "Drive-Ordner-ID für die Suche (leer = gesamte 'Meine Ablage')",
           "takeout_drive_delete_after_sync": "Archiv nach erfolgreichem Import aus Drive löschen",
           "takeout_drive_delete_permanently": "Endgültig löschen statt in den Papierkorb verschieben (gibt Quota sofort frei, NICHT wiederherstellbar)",
-          "download_concurrency": "Parallele Downloads (1-8)"
+          "download_concurrency": "Parallele Downloads (1-8)",
+          "takeout_curl_session": "Erfasste Sitzung (cURL/PowerShell, optional) - siehe README „cURL-Sitzung“",
+          "takeout_curl_max_files": "Maximale Archivnummer (Sicherheitsgrenze)"
         }
       }
     },
@@ -98,7 +102,9 @@
           "takeout_drive_folder_id": "Drive-Ordner-ID für die Suche (leer = gesamte 'Meine Ablage')",
           "takeout_drive_delete_after_sync": "Archiv nach erfolgreichem Import aus Drive löschen",
           "takeout_drive_delete_permanently": "Endgültig löschen statt in den Papierkorb verschieben (gibt Quota sofort frei, NICHT wiederherstellbar)",
-          "download_concurrency": "Parallele Downloads (1-8)"
+          "download_concurrency": "Parallele Downloads (1-8)",
+          "takeout_curl_session": "Erfasste Sitzung (cURL/PowerShell, optional) - siehe README „cURL-Sitzung“",
+          "takeout_curl_max_files": "Maximale Archivnummer (Sicherheitsgrenze)"
         }
       }
     }

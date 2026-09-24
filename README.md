@@ -28,9 +28,10 @@ custom_components/google_photos_backup/
     ├── base.py               # BackupBackend ABC, BackupStats, SyncStateStore
     ├── fsutil.py             # shared file/folder/hash logic
     ├── throttle.py            # shared bandwidth-limited HTTP reads (library_api, takeout)
+    ├── curl_session.py        # parses a pasted cURL/PowerShell command (see credit in README)
     ├── library_api.py        # Library API (app-owned) + Picker API
     ├── rclone_backend.py     # subprocess wrapper around `rclone`
-    └── takeout_backend.py    # Takeout archive import + optional Drive sync
+    └── takeout_backend.py    # Takeout archive import, optional cURL-session fetch + Drive sync
 ```
 
 Each backend implements the same `BackupBackend` interface
@@ -190,14 +191,14 @@ through this exact rclone remote - see rclone docs
 2. Optional but recommended: set up a recurring backup under "Scheduled
    exports" (every 2 months, 1 year) and choose Drive/Dropbox/OneDrive/Box
    as the destination.
-3. Get finished archives into the configured `takeout_watch_dir` - two
+3. Get finished archives into the configured `takeout_watch_dir` - three
    ways, combinable:
    - Manually (or via your own separate sync step from the cloud
      destination in step 2 - rclone, Nextcloud, whatever you already run).
-     This is also the **only** way to use a one-time "send download link
-     via email" export - see "Large libraries" below for why, Google
-     requires an interactive, re-confirmed-per-download sign-in for those
-     links that no integration can automate.
+   - Paste a **captured browser session** (cURL/PowerShell) into
+     `takeout_curl_session` - see "cURL session" below. The only
+     automatable option for a one-time "send download link via email"
+     export.
    - Enable **Drive sync** during setup - see "Google Drive sync" below.
 4. Config flow: backend `takeout`, target directory, watch directory,
    interval, optionally "delete archive after import".
@@ -209,6 +210,50 @@ through this exact rclone remote - see rclone docs
    sidecars, `archive_browser.html`) - RAW, `.mkv`, `.webm`, `.tif`,
    motion-photo `.mp` and any other format included, not just common
    JPEG/MP4 types.
+
+#### cURL session
+
+> **Credit:** this approach - capture one authenticated browser request as
+> a cURL/PowerShell command, then walk Google's numbered filename pattern
+> to fetch every other file in the export with that same session - is
+> adapted from
+> [clivewatts/takeout_downloader_script](https://github.com/clivewatts/takeout_downloader_script)
+> (MIT licensed). That project is a full-featured *standalone* downloader
+> (parallel downloads, a TUI/web UI, resumable byte-range downloads) if
+> you'd rather not go through Home Assistant for this at all - what's here
+> is a smaller, integration-native reimplementation of the same core idea
+> (see `backends/curl_session.py`), not a copy of that code.
+
+Google's one-time "send download link via email" export (see "Large
+libraries" below) genuinely cannot be automated: each email link needs an
+interactive, re-confirmed-per-download sign-in, and there is no session to
+reuse (this was tried and confirmed broken in practice - see the removed
+`takeout_download_links` feature in git history). The **"Manage exports"**
+page on takeout.google.com is different: its Download button is
+authenticated by your *browser's own session cookie*, and that cookie
+stays valid for repeat use for roughly an hour - long enough to fetch
+every split archive in an export automatically once you've captured it
+once.
+
+1. Go to [Google Takeout → Manage exports](https://takeout.google.com/settings/takeout),
+   open DevTools (`F12`) → **Network** tab, and click **Download** on any
+   one file of your export.
+2. Right-click the resulting request → **Copy** → **Copy as cURL** (or
+   **Copy as PowerShell** on Windows).
+3. Paste the whole thing into `takeout_curl_session` (setup or later via
+   Configure). It only needs the cookie and the URL - both are pulled out
+   of whatever headers/format your browser produced.
+4. The integration fetches every archive in the export (`..._001.zip`,
+   `..._002.zip`, ...) using that captured session, stopping once it hits
+   three consecutive "file not found" responses (the export is done) or a
+   configurable safety cap (`takeout_curl_max_files`, default 100).
+   Already-downloaded files are skipped on a later run.
+
+**When the session expires** (~1 hour, or if Google was never actually
+signed in to that captured request): the run stops and reports a clear
+error naming the file it got stuck on. Repeat steps 1-3 for a fresh
+session and paste it back in - already-downloaded archives are left
+alone, only what's still missing gets fetched.
 
 #### Google Drive sync
 
@@ -286,13 +331,20 @@ quota isn't enough:
    storage quota, since the archives are only made available for direct
    download for a limited time (~7 days, max. 5 downloads per archive).
    Choose a 50GB archive size to keep the number of files small.
-2. **Download the archive(s) yourself, in a real signed-in browser, and
-   place them into `takeout_watch_dir`.** Confirmed in practice
-   (2026-09-24): these links are not fetchable by any automation -
-   Google requires an interactive, re-confirmed-per-download sign-in
-   (passkey or equivalent) for every single download, not just once per
-   session. There is no `takeout_download_links` field or similar; this
-   step is manual, every time, for this delivery method.
+2. Get the archive(s) into `takeout_watch_dir`:
+   - **Try the cURL session first** (see "cURL session" above): once the
+     export is ready, check whether it also appears with its own Download
+     button on the **Manage exports** page (not just in the email) - if
+     it does, capturing that request lets the integration fetch every
+     split archive automatically, same as any other export.
+   - **If it doesn't appear there** (email-only delivery, no Manage
+     Exports entry): download the archive(s) yourself in a real
+     signed-in browser and place them into `takeout_watch_dir` by hand.
+     Confirmed in practice (2026-09-24) that the emailed one-time links
+     themselves are not fetchable by any automation - Google requires an
+     interactive, re-confirmed-per-download sign-in (passkey or
+     equivalent) for every single download of *those specific links*,
+     not just once per session.
 3. **Only then** switch to "Scheduled exports" (Drive), optionally with
    Drive sync enabled (see above). Since June 2026 Google Photos exports
    are **incremental**: the first run exports the whole library, every run
@@ -332,16 +384,20 @@ derived from the JSON).
   camera already sets EXIF correctly.
 - No automated *triggering* of a Takeout export via browser automation -
   deliberately not implemented (fragile, potentially violates Google's
-  terms of service for automated access to the web UI). Drive sync only
-  *fetches* exports that already exist (created by you manually, or by
-  Takeout's own "Scheduled exports" feature) - it doesn't script a
-  Google login or the Takeout web UI itself.
-- "Send download link via email" exports cannot be fetched by this (or
-  any) integration - confirmed in practice (2026-09-24) that Google
-  requires an interactive, re-confirmed-per-download sign-in for every
-  single download of these links. Download them yourself in a real
-  browser and place them into `takeout_watch_dir` - see "Large
-  libraries" above.
+  terms of service for automated access to the web UI). Drive sync and
+  the cURL session both only *fetch* exports that already exist (created
+  by you manually, or by Takeout's own "Scheduled exports" feature) -
+  neither scripts a Google login or the Takeout web UI itself; the cURL
+  session needs one manual capture step (see "cURL session" above) to
+  get that initial authenticated request.
+- The *emailed one-time download links themselves* (not the "Manage
+  exports" page) cannot be fetched by this (or any) integration -
+  confirmed in practice (2026-09-24) that Google requires an
+  interactive, re-confirmed-per-download sign-in for every single
+  download of those specific links, with no session to reuse. If the
+  export doesn't also show up with its own Download button on "Manage
+  exports", download it yourself in a real browser and place it into
+  `takeout_watch_dir` - see "Large libraries" above.
 
 ## Development
 

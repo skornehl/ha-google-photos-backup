@@ -3,22 +3,27 @@
 This is the only backend that can see a user's *entire* existing library
 (see README.md) - because it never talks to a restricted photos API at
 all. The trade-off is that it's not push-based by default: archive files
-need to land in `takeout_watch_dir` somehow. Two ways to get them there,
-combinable:
+need to land in `takeout_watch_dir` somehow. Three ways to get them
+there, combinable:
 
   1. Manual: place archives into takeout_watch_dir yourself (e.g. copied
      from Google Takeout's own "scheduled exports" feature, which can
      auto-generate a new export every 2 months for a year into linked
      Drive/Dropbox/OneDrive/Box storage) via a separate sync step outside
-     this integration's scope (rclone, Nextcloud, manual copy, ...). Also
-     the only option for a one-time "send download link via email"
-     export (see README "Large libraries" section): confirmed in
-     practice (2026-09-24) that Google requires an interactive,
-     re-confirmed-per-download sign-in (passkey) for these links, so
-     there is no way to fetch them without a human in a real browser -
-     an earlier version of this backend had a `_download_links` method
-     that tried a plain HTTPS fetch and was removed for that reason.
-  2. `_sync_drive_folder`: optional continuous alternative to (1) - polls
+     this integration's scope (rclone, Nextcloud, manual copy, ...).
+  2. `_download_via_curl_session` (see curl_session.py): paste a cURL/
+     PowerShell command captured from the Download button on Takeout's
+     "Manage exports" page. That request is authenticated by the
+     browser's own session cookie (unlike a one-time emailed download
+     link - confirmed in practice 2026-09-24 that those need a fresh
+     interactive sign-in *every single download* and can't be automated
+     at all, see the removed `takeout_download_links`/`_download_links`
+     history in git log), and the cookie stays valid for repeat use for
+     roughly an hour - long enough to fetch every split archive in an
+     export by walking Google's numbered filename pattern. Credit:
+     adapted from clivewatts/takeout_downloader_script, see
+     curl_session.py.
+  3. `_sync_drive_folder`: optional continuous alternative to (1) - polls
      Google Drive directly via the Drive API (OAuth, drive.readonly for
      listing/downloading + drive.metadata for the optional cleanup below)
      for new "takeout-*" archives and downloads them in automatically.
@@ -62,9 +67,12 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from ..const import (
     CONF_BANDWIDTH_LIMIT_KBPS,
+    CONF_TAKEOUT_CURL_MAX_FILES,
+    CONF_TAKEOUT_CURL_SESSION,
     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
     CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
@@ -72,6 +80,7 @@ from ..const import (
     CONF_TAKEOUT_WATCH_DIR,
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
+    DEFAULT_TAKEOUT_CURL_MAX_FILES,
     DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     DOWNLOAD_TIMEOUT,
@@ -80,6 +89,7 @@ from ..const import (
     TAKEOUT_ARCHIVE_SUFFIXES,
 )
 from .base import BackupBackend, BackupStats, SyncStateStore
+from .curl_session import parse_curl_session
 from .fsutil import dest_dir_for_date, ensure_target_dir, sha256_file, unique_destination
 from .throttle import throttled_stream_to_file
 
@@ -143,10 +153,11 @@ class TakeoutBackend(BackupBackend):
             CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC, DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC
         )
 
-        # Drive sync only ever adds files to watch_dir - the archive
+        # Both of these only ever add files to watch_dir - the archive
         # scan/import below then treats them exactly like anything the
         # user dropped in manually, so there's exactly one import code
         # path regardless of how an archive got here.
+        await self._download_via_curl_session(watch_dir, stats)
         await self._sync_drive_folder(watch_dir, stats)
 
         # name -> Drive file ID, persisted across runs so an archive that
@@ -183,6 +194,90 @@ class TakeoutBackend(BackupBackend):
                 await self.hass.async_add_executor_job(archive.unlink, True)
 
         return stats
+
+    # -- cURL/PowerShell captured session (cookie-authenticated, no OAuth) ---
+
+    async def _download_via_curl_session(self, watch_dir: Path, stats: BackupStats) -> None:
+        """Fetch every archive in a Takeout export using a session cookie
+        captured from the browser (see curl_session.py). Credit:
+        clivewatts/takeout_downloader_script - see the module docstring
+        above and curl_session.py."""
+        raw = self._option(CONF_TAKEOUT_CURL_SESSION, "") or ""
+        if not raw.strip():
+            return
+
+        session_info = parse_curl_session(raw)
+        if session_info is None:
+            stats.errors.append(
+                "Could not parse takeout_curl_session - paste the full cURL "
+                "or PowerShell command exactly as copied from DevTools "
+                "(Network tab, right-click the Download request, "
+                "Copy as cURL/Copy as PowerShell). See README."
+            )
+            return
+
+        max_files = int(
+            self._option(CONF_TAKEOUT_CURL_MAX_FILES, DEFAULT_TAKEOUT_CURL_MAX_FILES)
+        )
+        limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
+        http_session = async_get_clientsession(self.hass)
+        headers = {
+            "Cookie": session_info.cookie,
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            ),
+        }
+
+        consecutive_404 = 0
+        seq = 1
+        while seq <= max_files and consecutive_404 < 3:
+            name = session_info.filename(seq)
+            dest = watch_dir / name
+            if await self.hass.async_add_executor_job(dest.exists):
+                # Already downloaded (this run or a previous one) -
+                # throttled_stream_to_file only ever leaves a complete
+                # file at this path, never a partial one, see throttle.py.
+                seq += 1
+                consecutive_404 = 0
+                continue
+
+            url = session_info.url(seq)
+            try:
+                async with http_session.get(
+                    url, headers=headers, allow_redirects=True, timeout=DOWNLOAD_TIMEOUT
+                ) as resp:
+                    if resp.status == 404:
+                        consecutive_404 += 1
+                        seq += 1
+                        continue
+                    if resp.status in (401, 403) or "accounts.google" in str(resp.url):
+                        stats.errors.append(
+                            f"Google session expired while downloading {name} - "
+                            "capture a fresh cURL/PowerShell command (click "
+                            "Download again in Manage exports, DevTools -> "
+                            "Network -> Copy as cURL) and paste it into "
+                            "takeout_curl_session. Already-downloaded files "
+                            "are kept, the next run resumes from here."
+                        )
+                        return
+                    resp.raise_for_status()
+                    if "html" in resp.headers.get("Content-Type", "").lower():
+                        stats.errors.append(
+                            f"{name}: response is an HTML page rather than an "
+                            "archive - the session has likely expired, see "
+                            "above."
+                        )
+                        return
+                    _LOGGER.info(
+                        "Downloading Takeout archive via captured session: %s", name
+                    )
+                    await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
+            except Exception as err:  # noqa: BLE001 - surfaced via sensor
+                stats.errors.append(f"{name}: {err}")
+                return
+
+            consecutive_404 = 0
+            seq += 1
 
     def _list_new_archives(self, watch_dir: Path) -> list[Path]:
         processed = set(self.state.get("processed_archives", []))
