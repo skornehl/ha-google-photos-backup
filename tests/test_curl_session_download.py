@@ -25,10 +25,18 @@ _CURL = (
 )
 
 
-def _fake_response(status: int, content_type: str = "application/zip", body: bytes = b"x", url: str = ""):
+def _fake_response(
+    status: int,
+    content_type: str = "application/zip",
+    body: bytes = b"x",
+    url: str = "",
+    content_length: int | None = None,
+):
     resp = MagicMock()
     resp.status = status
     resp.headers = {"Content-Type": content_type}
+    if content_length is not None:
+        resp.headers["Content-Length"] = str(content_length)
     resp.url = url or "https://takeout-download.usercontent.google.com/download/x"
 
     def _raise():
@@ -171,3 +179,44 @@ async def test_unparseable_session_reports_clear_error(tmp_path: Path):
 
     assert len(stats.errors) == 1
     assert "Could not parse takeout_curl_session" in stats.errors[0]
+
+
+async def test_reports_progress_during_and_resets_after_download(monkeypatch, tmp_path: Path):
+    """A single archive download can run for hours (issue #21 follow-up) -
+    current_archive/current_action/current_archive_bytes_* must move while
+    it's happening and reset to idle once the whole watch_dir pass is
+    done, so the activity sensor doesn't get stuck showing "downloading"
+    forever."""
+    responses = {
+        1: _fake_response(200, body=b"0123456789", content_length=10),
+        2: _fake_response(404),
+        3: _fake_response(404),
+        4: _fake_response(404),
+    }
+    fake_session = MagicMock()
+    fake_session.get = lambda url, headers=None, **kwargs: responses[
+        int(url.rsplit("-", 1)[-1][:3])
+    ]
+    monkeypatch.setattr(takeout_module, "async_get_clientsession", lambda hass: fake_session)
+
+    backend = _make_backend(tmp_path, _CURL)
+    backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    stats = BackupStats()
+    snapshots: list[tuple[str | None, str | None, int, int | None]] = []
+    backend._on_progress = lambda s: snapshots.append(
+        (s.current_archive, s.current_action, s.current_archive_bytes_done, s.current_archive_bytes_total)
+    )
+
+    await backend._download_via_curl_session(tmp_path, stats)
+
+    # At least one report happened while archive 001 was actively
+    # downloading, with the byte total picked up from Content-Length.
+    assert (
+        "takeout-20260923T121036Z-1-001.zip",
+        "downloading",
+        10,
+        10,
+    ) in snapshots
+    # Idle again once the whole pass (all archives) has finished.
+    assert stats.current_archive is None
+    assert stats.current_action is None

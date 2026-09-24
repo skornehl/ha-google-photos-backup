@@ -131,6 +131,12 @@
       },
       "free_space": {
         "name": "Freier Speicherplatz"
+      },
+      "current_activity": {
+        "name": "Aktuelle Aktivität"
+      },
+      "download_progress": {
+        "name": "Download-Fortschritt"
       }
     }
   },

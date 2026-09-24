@@ -25,6 +25,20 @@ class BackupStats:
     #: initial import (issue #21).
     in_progress: bool = False
 
+    #: What the backend is doing *right now*, for the current_activity
+    #: sensor - a single huge archive download or extraction can otherwise
+    #: sit for hours between the coarser files_downloaded/files_skipped
+    #: updates above, which only change once a whole archive is imported.
+    #: current_action is "downloading" | "importing" | None (idle).
+    current_archive: str | None = None
+    current_action: str | None = None
+    current_archive_bytes_done: int = 0
+    current_archive_bytes_total: int | None = None
+    #: Archives queued for import this run vs. already fully imported -
+    #: only known once the watch_dir scan has run, so both start at 0.
+    archives_total: int = 0
+    archives_done: int = 0
+
     def merge(self, other: BackupStats) -> None:
         self.files_downloaded += other.files_downloaded
         self.files_skipped += other.files_skipped
