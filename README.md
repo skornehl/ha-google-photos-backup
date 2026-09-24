@@ -30,7 +30,7 @@ custom_components/google_photos_backup/
     ├── throttle.py            # shared bandwidth-limited HTTP reads (library_api, takeout)
     ├── library_api.py        # Library API (app-owned) + Picker API
     ├── rclone_backend.py     # subprocess wrapper around `rclone`
-    └── takeout_backend.py    # Takeout archive import, optional download-link fetch + Drive sync
+    └── takeout_backend.py    # Takeout archive import + optional Drive sync
 ```
 
 Each backend implements the same `BackupBackend` interface
@@ -190,13 +190,14 @@ through this exact rclone remote - see rclone docs
 2. Optional but recommended: set up a recurring backup under "Scheduled
    exports" (every 2 months, 1 year) and choose Drive/Dropbox/OneDrive/Box
    as the destination.
-3. Get finished archives into the configured `takeout_watch_dir` - three
-   ways, combinable, all optional except the first:
+3. Get finished archives into the configured `takeout_watch_dir` - two
+   ways, combinable:
    - Manually (or via your own separate sync step from the cloud
      destination in step 2 - rclone, Nextcloud, whatever you already run).
-   - Paste one or more **Takeout email download links** into the
-     `takeout_download_links` field (setup or later via Configure) - see
-     "Download links" below.
+     This is also the **only** way to use a one-time "send download link
+     via email" export - see "Large libraries" below for why, Google
+     requires an interactive, re-confirmed-per-download sign-in for those
+     links that no integration can automate.
    - Enable **Drive sync** during setup - see "Google Drive sync" below.
 4. Config flow: backend `takeout`, target directory, watch directory,
    interval, optionally "delete archive after import".
@@ -208,26 +209,6 @@ through this exact rclone remote - see rclone docs
    sidecars, `archive_browser.html`) - RAW, `.mkv`, `.webm`, `.tif`,
    motion-photo `.mp` and any other format included, not just common
    JPEG/MP4 types.
-
-#### Download links
-
-If you request a Takeout export with delivery method **"Send download
-link via email"**, paste the link(s) from that email (one per line) into
-`takeout_download_links` - the integration fetches them directly into
-`takeout_watch_dir` on the next sync, no manual download needed.
-
-These are meant to be pre-authorized, time-limited URLs (valid ~7 days,
-max. 5 downloads each), fetched with a plain HTTPS request - no Google
-sign-in performed by this integration. **If Google actually requires an
-authenticated browser session for a given link** (this integration
-deliberately does not attempt to script a Google login - see "Known
-limitations"), the download fails with a clear error on the sensor
-instead of silently saving the resulting HTML login page as if it were an
-archive; fall back to downloading it yourself and dropping it into
-`takeout_watch_dir` in that case. A successfully downloaded link is
-remembered (won't be re-fetched); failed ones are retried on the next
-sync automatically since links commonly used up mid-way just need one
-more attempt.
 
 #### Google Drive sync
 
@@ -258,9 +239,8 @@ straight into `takeout_watch_dir`.
    whole Drive, needed to actually download archive contents.
 1. Config flow: backend `takeout` → "Enable Google Drive sync" → sign in
    with your Google account → target directory, watch directory,
-   interval, delete-after-import, download links, Drive folder ID
-   (optional, empty = all of My Drive), and the two Drive-cleanup options
-   below.
+   interval, delete-after-import, Drive folder ID (optional, empty = all
+   of My Drive), and the two Drive-cleanup options below.
 2. Set up "Scheduled exports" (see step 2 above) with **Drive** as the
    destination - this backend then picks up every new export
    automatically, no external sync tool needed at all.
@@ -306,10 +286,13 @@ quota isn't enough:
    storage quota, since the archives are only made available for direct
    download for a limited time (~7 days, max. 5 downloads per archive).
    Choose a 50GB archive size to keep the number of files small.
-2. Paste the resulting email link(s) into `takeout_download_links` (see
-   "Download links" above) - or download them yourself within the 7 days
-   and place them into `takeout_watch_dir` if a link needs a browser
-   session this integration can't provide.
+2. **Download the archive(s) yourself, in a real signed-in browser, and
+   place them into `takeout_watch_dir`.** Confirmed in practice
+   (2026-09-24): these links are not fetchable by any automation -
+   Google requires an interactive, re-confirmed-per-download sign-in
+   (passkey or equivalent) for every single download, not just once per
+   session. There is no `takeout_download_links` field or similar; this
+   step is manual, every time, for this delivery method.
 3. **Only then** switch to "Scheduled exports" (Drive), optionally with
    Drive sync enabled (see above). Since June 2026 Google Photos exports
    are **incremental**: the first run exports the whole library, every run
@@ -324,8 +307,8 @@ Google Takeout doesn't allow selecting by album or time range for
 Photos - a one-time export is always the complete library.
 
 **Limitation:** no real-time sync - depends on how often exports are
-generated (Drive sync/download links still just react to what already
-exists; they don't make Google generate exports faster). No automatic
+generated (Drive sync still just reacts to what already exists; it
+doesn't make Google generate exports faster). No automatic
 rewriting of EXIF tags (only filesystem mtime/folder structure are
 derived from the JSON).
 
@@ -349,14 +332,16 @@ derived from the JSON).
   camera already sets EXIF correctly.
 - No automated *triggering* of a Takeout export via browser automation -
   deliberately not implemented (fragile, potentially violates Google's
-  terms of service for automated access to the web UI). Download links
-  and Drive sync only *fetch* exports that already exist (created by you
-  manually, or by Takeout's own "Scheduled exports" feature) - neither
-  scripts a Google login or the Takeout web UI itself.
-- Download links only work if Google serves the archive to a plain,
-  unauthenticated HTTPS request; if a given link actually requires a
-  logged-in browser session, the fetch fails with a clear error rather
-  than silently misbehaving - see "Download links" above.
+  terms of service for automated access to the web UI). Drive sync only
+  *fetches* exports that already exist (created by you manually, or by
+  Takeout's own "Scheduled exports" feature) - it doesn't script a
+  Google login or the Takeout web UI itself.
+- "Send download link via email" exports cannot be fetched by this (or
+  any) integration - confirmed in practice (2026-09-24) that Google
+  requires an interactive, re-confirmed-per-download sign-in for every
+  single download of these links. Download them yourself in a real
+  browser and place them into `takeout_watch_dir` - see "Large
+  libraries" above.
 
 ## Development
 

@@ -55,7 +55,6 @@
           "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
           "takeout_watch_dir": "Watch directory for Takeout archives",
           "takeout_delete_after_import": "Delete archive after successful import",
-          "takeout_download_links": "Takeout email download links (one per line, optional)",
           "download_concurrency": "Parallel downloads (1-8)"
         }
       },
@@ -68,7 +67,6 @@
           "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
           "takeout_watch_dir": "Watch directory for Takeout archives",
           "takeout_delete_after_import": "Delete archive after successful import",
-          "takeout_download_links": "Takeout email download links (one per line, optional)",
           "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)",
           "takeout_drive_delete_after_sync": "Delete archive from Drive after successful import",
           "takeout_drive_delete_permanently": "Delete permanently instead of moving to trash (frees quota immediately, NOT recoverable)",
@@ -97,7 +95,6 @@
         "data": {
           "sync_interval_minutes": "Sync interval (minutes)",
           "bandwidth_limit_kbps": "Bandwidth limit (KiB/s, 0 = unlimited)",
-          "takeout_download_links": "Takeout email download links (one per line, optional)",
           "takeout_drive_folder_id": "Drive folder ID to search (empty = all of My Drive)",
           "takeout_drive_delete_after_sync": "Delete archive from Drive after successful import",
           "takeout_drive_delete_permanently": "Delete permanently instead of moving to trash (frees quota immediately, NOT recoverable)",

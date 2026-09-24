@@ -1,12 +1,8 @@
 """Diagnostics support - redacted state dump for support requests.
 
-Deliberately conservative about what leaves the user's machine. Two
-things in this integration's config are outright credentials:
-
-  - `token` (and `auth_implementation`): the OAuth access/refresh token.
-  - `takeout_download_links`: Takeout email links carry Google-issued
-    auth material in their query string - the same reasoning as issue
-    #18, where these were removed from log output.
+Deliberately conservative about what leaves the user's machine. `token`
+(and `auth_implementation`) is an outright credential: the OAuth
+access/refresh token.
 
 And the persisted sync state is dumped as *counts*, never as the raw
 lists: `processed_hashes` alone holds one SHA-256 per backed-up file, so
@@ -22,7 +18,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    CONF_TAKEOUT_DOWNLOAD_LINKS,
     CONF_TAKEOUT_DRIVE_FOLDER_ID,
     DOMAIN,
 )
@@ -31,7 +26,6 @@ from .coordinator import GooglePhotosBackupCoordinator
 TO_REDACT = {
     "token",
     "auth_implementation",
-    CONF_TAKEOUT_DOWNLOAD_LINKS,
     # Not a credential, but it identifies a specific Drive location.
     # Presence/absence is what matters for support, not the value.
     CONF_TAKEOUT_DRIVE_FOLDER_ID,
@@ -45,7 +39,6 @@ def _state_summary(state_data: dict[str, Any]) -> dict[str, Any]:
         "processed_ids",
         "processed_hashes",
         "processed_archives",
-        "downloaded_takeout_links",
         "downloaded_drive_file_ids",
     ):
         value = state_data.get(key)

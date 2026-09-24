@@ -3,19 +3,22 @@
 This is the only backend that can see a user's *entire* existing library
 (see README.md) - because it never talks to a restricted photos API at
 all. The trade-off is that it's not push-based by default: archive files
-need to land in `takeout_watch_dir` somehow. Three ways to get them there,
-all optional and combinable:
+need to land in `takeout_watch_dir` somehow. Two ways to get them there,
+combinable:
 
   1. Manual: place archives into takeout_watch_dir yourself (e.g. copied
      from Google Takeout's own "scheduled exports" feature, which can
      auto-generate a new export every 2 months for a year into linked
      Drive/Dropbox/OneDrive/Box storage) via a separate sync step outside
-     this integration's scope (rclone, Nextcloud, manual copy, ...).
-  2. `_download_links`: paste one-time "download link" URLs from a
-     Takeout export email (delivery method "Send download link via
-     email") - see README "Large libraries" section for why that delivery
-     method matters (it doesn't count against Drive storage quota).
-  3. `_sync_drive_folder`: optional continuous alternative to (1) - polls
+     this integration's scope (rclone, Nextcloud, manual copy, ...). Also
+     the only option for a one-time "send download link via email"
+     export (see README "Large libraries" section): confirmed in
+     practice (2026-09-24) that Google requires an interactive,
+     re-confirmed-per-download sign-in (passkey) for these links, so
+     there is no way to fetch them without a human in a real browser -
+     an earlier version of this backend had a `_download_links` method
+     that tried a plain HTTPS fetch and was removed for that reason.
+  2. `_sync_drive_folder`: optional continuous alternative to (1) - polls
      Google Drive directly via the Drive API (OAuth, drive.readonly for
      listing/downloading + drive.metadata for the optional cleanup below)
      for new "takeout-*" archives and downloads them in automatically.
@@ -47,7 +50,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import shutil
 import tarfile
 import tempfile
@@ -56,18 +58,14 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
-from aiohttp import ClientResponse
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from ..const import (
     CONF_BANDWIDTH_LIMIT_KBPS,
     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
-    CONF_TAKEOUT_DOWNLOAD_LINKS,
     CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     CONF_TAKEOUT_DRIVE_FOLDER_ID,
@@ -122,8 +120,7 @@ class TakeoutBackend(BackupBackend):
         on_progress: Callable[[BackupStats], None] | None = None,
     ) -> None:
         """`oauth_session` is only set when Drive sync is enabled - see
-        backends/__init__.py::async_create_backend. Download links never
-        use it; they're plain, unauthenticated HTTPS fetches."""
+        backends/__init__.py::async_create_backend."""
         super().__init__(hass, entry, state, on_progress)
         self._oauth = oauth_session
 
@@ -146,11 +143,10 @@ class TakeoutBackend(BackupBackend):
             CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC, DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC
         )
 
-        # Both of these only ever add files to watch_dir - the archive
+        # Drive sync only ever adds files to watch_dir - the archive
         # scan/import below then treats them exactly like anything the
         # user dropped in manually, so there's exactly one import code
         # path regardless of how an archive got here.
-        await self._download_links(watch_dir, stats)
         await self._sync_drive_folder(watch_dir, stats)
 
         # name -> Drive file ID, persisted across runs so an archive that
@@ -198,89 +194,6 @@ class TakeoutBackend(BackupBackend):
             and any(p.name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES)
         ]
         return found
-
-    # -- download links (plain HTTPS, no OAuth) ------------------------------
-
-    async def _download_links(self, watch_dir: Path, stats: BackupStats) -> None:
-        raw = self._option(CONF_TAKEOUT_DOWNLOAD_LINKS, "") or ""
-        urls = [line.strip() for line in raw.splitlines() if line.strip()]
-        if not urls:
-            return
-
-        downloaded: list[str] = self.state.get("downloaded_takeout_links", [])
-        limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
-        session = async_get_clientsession(self.hass)
-
-        for url in urls:
-            if url in downloaded:
-                continue
-            # Truncated like the error message below: these URLs carry
-            # Google-issued auth material in their query string, and HA
-            # logs get pasted into issue reports/diagnostics uploads.
-            _LOGGER.info("Downloading Takeout archive from a manual link: %s", _redact_url(url))
-            dest: Path | None = None
-            try:
-                async with session.get(
-                    url, allow_redirects=True, timeout=DOWNLOAD_TIMEOUT
-                ) as resp:
-                    resp.raise_for_status()
-                    if "html" in resp.headers.get("Content-Type", "").lower():
-                        # Most likely a Google sign-in/error page rather than
-                        # the archive - this link needs an authenticated
-                        # browser session we don't have here. Fail loudly
-                        # instead of silently saving the HTML as a "zip".
-                        raise ValueError(
-                            "The response is an HTML page rather than an archive - "
-                            "this link most likely requires a signed-in Google "
-                            "browser session. Download the archive manually instead "
-                            "and place it into takeout_watch_dir."
-                        )
-                    proposed_name = self._proposed_filename_for_link(resp, url)
-                    name = await self.hass.async_add_executor_job(
-                        self._resolve_unique_filename, watch_dir, proposed_name
-                    )
-                    dest = watch_dir / name
-                    await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
-            except Exception as err:  # noqa: BLE001 - surfaced via sensor
-                stats.errors.append(f"Download link failed ({_redact_url(url)}): {err}")
-                if dest is not None:
-                    await self.hass.async_add_executor_job(dest.unlink, True)
-                continue
-
-            downloaded.append(url)
-            self.state.set("downloaded_takeout_links", downloaded)
-
-    @staticmethod
-    def _proposed_filename_for_link(resp: ClientResponse, url: str) -> str:
-        """Pure string logic, no filesystem access - safe to call directly
-        from a coroutine. See _resolve_unique_filename() for the part that
-        actually needs to touch the filesystem."""
-        disposition = resp.headers.get("Content-Disposition", "")
-        match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition)
-        if match:
-            name = Path(match.group(1)).name
-        else:
-            name = Path(urlsplit(url).path).name
-        if not name or not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
-            name = f"takeout_link_{abs(hash(url)) % 10_000_000}.zip"
-        return name
-
-    @staticmethod
-    def _resolve_unique_filename(watch_dir: Path, name: str) -> str:
-        """Blocking (stat() calls) - always call via async_add_executor_job.
-
-        Two different email links could coincidentally suggest the same
-        filename (Google reuses "takeout-...-001.zip" numbering per
-        export) - never overwrite an existing file.
-        """
-        candidate = watch_dir / name
-        if not candidate.exists():
-            return name
-        stem, suffix = os.path.splitext(name)
-        n = 1
-        while (watch_dir / f"{stem}_{n}{suffix}").exists():
-            n += 1
-        return f"{stem}_{n}{suffix}"
 
     # -- Google Drive folder sync (OAuth, drive.readonly + drive.metadata) ---
 
@@ -557,27 +470,6 @@ def _is_takeout_content(path: Path) -> bool:
     return path.suffix.lower() not in TAKEOUT_METADATA_SUFFIXES
 
 
-def _redact_url(url: str) -> str:
-    """Scheme + host + path only, query string dropped.
-
-    Takeout download links carry Google-issued auth material in their
-    query parameters; HA logs and the last_error sensor both end up in
-    issue reports and diagnostics uploads, so the query string must
-    never appear in either. The path is kept because it's what actually
-    helps identify *which* link failed.
-    """
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return "<unparsable URL>"
-    if not parts.scheme and not parts.netloc:
-        return "<unparsable URL>"
-    redacted = f"{parts.scheme}://{parts.netloc}{parts.path}"
-    if parts.query:
-        redacted += "?<redacted>"
-    return redacted
-
-
 def _common_prefix_len(a: str, b: str) -> int:
     n = 0
     for ca, cb in zip(a, b):
@@ -594,10 +486,10 @@ def _safe_tar_extractall(tf: tarfile.TarFile, dest: Path) -> None:
 
     Unlike zipfile, tarfile.extractall() only defends against this by
     default starting with Python 3.14 (PEP 706's `filter="data"` becoming
-    the default). Takeout .tgz archives can reach this code via the
-    download-links feature (arbitrary user-pasted URLs) or Drive sync, not
-    just manually placed files, so this can't rely on "Google is trusted"
-    - and Home Assistant can run on Python versions well before 3.14.
+    the default). Takeout .tgz archives can reach this code via Drive
+    sync, not just manually placed files, so this can't rely on "Google
+    is trusted" - and Home Assistant can run on Python versions well
+    before 3.14.
 
     Strategy: prefer the real `filter="data"` where available (Python
     3.12+, does more than just path-traversal checking - also drops

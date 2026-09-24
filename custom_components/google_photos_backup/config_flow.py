@@ -33,7 +33,6 @@ from .const import (
     CONF_RCLONE_SOURCE_PATH,
     CONF_SYNC_INTERVAL_MINUTES,
     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
-    CONF_TAKEOUT_DOWNLOAD_LINKS,
     CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     CONF_TAKEOUT_DRIVE_FOLDER_ID,
@@ -58,8 +57,6 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-_MULTILINE_TEXT = selector.selector({"text": {"multiline": True}})
 
 
 def _common_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -98,10 +95,6 @@ def _takeout_schema(*, drive_enabled: bool, defaults: dict[str, Any] | None = No
                 CONF_TAKEOUT_DELETE_AFTER_IMPORT,
                 default=defaults.get(CONF_TAKEOUT_DELETE_AFTER_IMPORT, DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT),
             ): bool,
-            vol.Optional(
-                CONF_TAKEOUT_DOWNLOAD_LINKS,
-                default=defaults.get(CONF_TAKEOUT_DOWNLOAD_LINKS, ""),
-            ): _MULTILINE_TEXT,
         }
     )
     if drive_enabled:
@@ -330,7 +323,7 @@ class GooglePhotosBackupFlowHandler(
 
 class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
     """Lets the user change sync interval, bandwidth limit, and (for
-    takeout) download links / Drive folder without re-running setup.
+    takeout with Drive sync) the Drive folder without re-running setup.
 
     Whether Drive sync itself is enabled is NOT editable here - toggling it
     on needs a fresh OAuth round trip, which an options flow can't do; to
@@ -366,11 +359,6 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
             ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY)),
         }
         if self.config_entry.data.get(CONF_BACKEND) == BACKEND_TAKEOUT:
-            schema_dict[
-                vol.Optional(
-                    CONF_TAKEOUT_DOWNLOAD_LINKS, default=_current(CONF_TAKEOUT_DOWNLOAD_LINKS, "")
-                )
-            ] = _MULTILINE_TEXT
             if self.config_entry.data.get(CONF_TAKEOUT_DRIVE_SYNC):
                 schema_dict[
                     vol.Optional(

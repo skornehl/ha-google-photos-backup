@@ -21,9 +21,9 @@ DEFAULT_SYNC_INTERVAL_MINUTES: Final = 60
 MIN_SYNC_INTERVAL_MINUTES: Final = 5
 
 # --- Bandwidth throttling ------------------------------------------------------
-# Applies to every backend that can transfer bytes itself: library_api and
-# takeout always can (takeout via download links / Drive sync, see below);
-# rclone passes it straight through as its own --bwlimit flag.
+# Applies to every backend that can transfer bytes itself: library_api
+# always can, takeout can when Drive sync is enabled (see below); rclone
+# passes it straight through as its own --bwlimit flag.
 CONF_BANDWIDTH_LIMIT_KBPS: Final = "bandwidth_limit_kbps"
 DEFAULT_BANDWIDTH_LIMIT_KBPS: Final = 0  # 0 = unlimited
 # Concurrent item downloads within one run (issue #20). Modest on purpose:
@@ -40,9 +40,9 @@ DOWNLOAD_CHUNK_SIZE: Final = 65536  # 64 KiB per network read while streaming
 DRIVE_DOWNLOAD_FLUSH_SIZE: Final = 8 * 1024 * 1024  # buffered writes for large archives
 
 # Explicit per-request timeout for the actual byte-content downloads
-# (library_api items, Drive archive downloads, download-link fetches) -
-# NOT applied to small JSON/listing calls, which are fine with whatever
-# default the underlying aiohttp session already has.
+# (library_api items, Drive archive downloads) - NOT applied to small
+# JSON/listing calls, which are fine with whatever default the
+# underlying aiohttp session already has.
 #
 # total=None deliberately leaves the *overall* duration unbounded: with a
 # low bandwidth_limit_kbps, a single large archive can legitimately take
@@ -110,15 +110,6 @@ CONF_TAKEOUT_WATCH_DIR: Final = "takeout_watch_dir"
 CONF_TAKEOUT_DELETE_AFTER_IMPORT: Final = "takeout_delete_after_import"
 DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT: Final = False
 TAKEOUT_ARCHIVE_SUFFIXES: Final = (".zip", ".tgz", ".tar.gz")
-
-# Optional: one-time archives from Takeout's "send download link via email"
-# delivery (see README "Large libraries" section) - newline-separated URLs,
-# downloaded straight into takeout_watch_dir. Plain HTTPS, no OAuth: these
-# are meant to be pre-authorized, time-limited URLs, not something that
-# needs a logged-in browser session. If Google *does* require one for a
-# given link, the download fails with a clear error instead of silently
-# saving an HTML login page as if it were an archive.
-CONF_TAKEOUT_DOWNLOAD_LINKS: Final = "takeout_download_links"
 
 # Optional: continuous alternative to manually placing archives in
 # takeout_watch_dir - polls a Google Drive location (My Drive root, or one

@@ -1,12 +1,7 @@
 """Regression tests for explicit download timeouts (issue #8).
 
-Only covers the two OAuth-based download call sites (library_api item
-download, Drive archive download) where mocking is straightforward. The
-plain aiohttp `session.get()` call in takeout_backend.py's
-_download_links() also passes `timeout=DOWNLOAD_TIMEOUT` (see the diff)
-but isn't covered here - mocking an async context manager response adds
-enough complexity that it wasn't worth it for a one-line "is this kwarg
-present" check; covered by code review instead.
+Covers the two OAuth-based download call sites (library_api item
+download, Drive archive download) where mocking is straightforward.
 """
 from __future__ import annotations
 
