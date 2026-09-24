@@ -35,11 +35,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # instead of endlessly retrying async_setup_entry.
         raise ConfigEntryNotReady(str(err)) from err
 
-    await coordinator.async_config_entry_first_refresh()
-
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    # Deliberately NOT coordinator.async_config_entry_first_refresh() (the
+    # usual pattern, which awaits the refresh before returning from this
+    # function): a backup run can take hours for a large first import, and
+    # Home Assistant's own bootstrap has a hard timeout on how long it
+    # waits for integrations to finish setting up. Confirmed in practice
+    # (2026-09-24) that reloading/restarting mid-backup gets the whole
+    # config entry cancelled with "Bootstrap stage 2 timeout" and dumped
+    # into setup_error - even though the backup itself was still making
+    # progress and didn't need to be interrupted at all. Every sensor here
+    # already handles `coordinator.data is None` gracefully (see
+    # sensor.py), and the coordinator reports live progress via
+    # on_progress/_handle_progress *during* a run (see coordinator.py) -
+    # so entities showing briefly-empty state until the first refresh
+    # completes in the background isn't a behavior regression, only a
+    # change in *when* that first refresh is allowed to start relative to
+    # Home Assistant's own startup.
+    entry.async_create_background_task(
+        hass,
+        coordinator.async_refresh(),
+        f"{DOMAIN}_{entry.entry_id}_first_refresh",
+    )
 
     _async_register_services(hass)
     return True

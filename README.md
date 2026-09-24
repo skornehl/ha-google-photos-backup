@@ -382,6 +382,14 @@ derived from the JSON).
 ## Known limitations / open items
 
 - No restore functionality, backup direction only.
+- **The first backup run after setup (or after a restart while one is
+  still catching up) runs in the background, not before entities appear.**
+  A large first import can take hours; blocking entity setup on it used
+  to collide with Home Assistant's own bootstrap timeout (confirmed in
+  practice 2026-09-24: a restart mid-backup got the whole config entry
+  cancelled and dumped into `setup_error`). Entities show no data for a
+  moment after setup/restart instead, then fill in as the coordinator's
+  first refresh reports progress - normal, not an error.
 - `library_api`/`rclone` are deliberately fully implemented (the spec
   calls for them), even though their practical value for a full backup is
   low under Google's current API policy - this could change if Google
