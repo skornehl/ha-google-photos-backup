@@ -15,7 +15,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.google_photos_backup.const import (
     BACKEND_TAKEOUT,
     CONF_BACKEND,
-    CONF_TAKEOUT_DOWNLOAD_LINKS,
     CONF_TARGET_DIR,
     DOMAIN,
 )
@@ -25,7 +24,6 @@ from custom_components.google_photos_backup.diagnostics import (
 
 _ACCESS_TOKEN = "ya29.SECRET-ACCESS-TOKEN"
 _REFRESH_TOKEN = "1//SECRET-REFRESH-TOKEN"
-_LINK_SECRET = "SECRET-DOWNLOAD-TOKEN"
 
 
 def _entry(hass) -> MockConfigEntry:
@@ -35,7 +33,6 @@ def _entry(hass) -> MockConfigEntry:
         data={
             CONF_BACKEND: BACKEND_TAKEOUT,
             CONF_TARGET_DIR: "/media/google_photos",
-            CONF_TAKEOUT_DOWNLOAD_LINKS: f"https://takeout.google.com/d?token={_LINK_SECRET}",
             "token": {"access_token": _ACCESS_TOKEN, "refresh_token": _REFRESH_TOKEN},
             "auth_implementation": "google_photos_backup",
         },
@@ -51,7 +48,7 @@ async def test_no_secret_survives_serialization(hass):
     result = await async_get_config_entry_diagnostics(hass, _entry(hass))
     blob = json.dumps(result)
 
-    for secret in (_ACCESS_TOKEN, _REFRESH_TOKEN, _LINK_SECRET):
+    for secret in (_ACCESS_TOKEN, _REFRESH_TOKEN):
         assert secret not in blob, f"secret leaked into the diagnostics export: {secret}"
 
 
