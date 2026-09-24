@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.google_photos_backup.backends.base import BackupStats, SyncStateStore
+from custom_components.google_photos_backup.backends.base import SyncStateStore
 from custom_components.google_photos_backup.backends.takeout_backend import TakeoutBackend
 from custom_components.google_photos_backup.const import CONF_TAKEOUT_WATCH_DIR, CONF_TARGET_DIR
 
