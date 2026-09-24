@@ -155,5 +155,21 @@
         }
       }
     }
+  },
+  "issues": {
+    "curl_session_expired": {
+      "title": "Google Photos Backup: Takeout-Sitzung abgelaufen",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Neuen cURL/PowerShell-Befehl einfügen",
+            "description": "Die erfasste Browser-Sitzung für „{title}“ zum Herunterladen der Takeout-Archive ist abgelaufen (echtes Google-Sitzungscookie, nur rund eine Stunde gültig). Öffne die „Exporte verwalten“-Seite auf takeout.google.com, klicke auf Herunterladen, kopiere die Anfrage im DevTools-Netzwerk-Tab als cURL oder PowerShell und füge sie unten ein. Bereits heruntergeladene Archive bleiben erhalten - der nächste Lauf setzt genau dort fort.",
+            "data": {
+              "takeout_curl_session": "cURL-/PowerShell-Befehl"
+            }
+          }
+        }
+      }
+    }
   }
 }

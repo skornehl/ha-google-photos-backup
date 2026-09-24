@@ -22,6 +22,7 @@ custom_components/google_photos_backup/
 ├── const.py
 ├── coordinator.py           # DataUpdateCoordinator, persisted sync state
 ├── sensor.py                # last_sync, files_backed_up, last_error, free_space
+├── repairs.py               # fix flow for the curl_session_expired repair issue
 ├── services.yaml
 ├── strings.json / translations/{en,de}.json
 └── backends/
@@ -257,10 +258,15 @@ once.
    Already-downloaded files are skipped on a later run.
 
 **When the session expires** (~1 hour, or if Google was never actually
-signed in to that captured request): the run stops and reports a clear
-error naming the file it got stuck on. Repeat steps 1-3 for a fresh
-session and paste it back in - already-downloaded archives are left
-alone, only what's still missing gets fetched.
+signed in to that captured request): the run stops, reports a clear error
+naming the file it got stuck on, and raises a **repair issue** under
+Settings → System → Repairs (easy to miss on an unattended schedule if
+the only signal were the error sensor). The repair's own fix flow lets
+you paste a fresh cURL/PowerShell command directly - repeat steps 1-2
+above and paste it there, no need to go through Configure. Already-
+downloaded archives are left alone, only what's still missing gets
+fetched on the next run. The issue clears itself automatically the next
+time a download with the new session succeeds.
 
 #### Google Drive sync
 
