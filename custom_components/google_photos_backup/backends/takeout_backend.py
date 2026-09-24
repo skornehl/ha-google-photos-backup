@@ -442,7 +442,16 @@ class TakeoutBackend(BackupBackend):
     # -- archive import (blocking, runs in executor) -------------------------
 
     def _import_archive(self, archive: Path, target_dir: str, stats: BackupStats) -> None:
-        with tempfile.TemporaryDirectory(prefix="gpb_takeout_") as tmp:
+        # dir=target_dir deliberately, NOT the OS default tmp location:
+        # Home Assistant OS mounts /tmp as tmpfs (RAM-backed), which is
+        # nowhere near big enough for a 50 GB+ Takeout archive regardless
+        # of how much space the actual target disk has (confirmed
+        # 2026-09-24: extraction failed with "only 3918 MiB available"
+        # while the target disk had 1.6+ TB free). Extracting directly
+        # on target_dir's filesystem also means the final shutil.move()
+        # below is a same-filesystem rename instead of a slow
+        # cross-filesystem copy when target_dir is a network mount.
+        with tempfile.TemporaryDirectory(prefix="gpb_takeout_", dir=target_dir) as tmp:
             tmp_path = Path(tmp)
             self._check_free_space(archive, tmp_path)
             self._extract(archive, tmp_path)

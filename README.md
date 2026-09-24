@@ -202,14 +202,21 @@ through this exact rclone remote - see rclone docs
    - Enable **Drive sync** during setup - see "Google Drive sync" below.
 4. Config flow: backend `takeout`, target directory, watch directory,
    interval, optionally "delete archive after import".
-5. The integration unpacks every new archive, files media
-   chronologically into `YYYY/YYYY-MM/` based on the `<file>.json`
-   sidecar (`photoTakenTime`), and skips already-imported files
-   (SHA-256 hash comparison, consistent across backends). Every file in
-   the archive is imported except Takeout's own metadata (`.json`
-   sidecars, `archive_browser.html`) - RAW, `.mkv`, `.webm`, `.tif`,
-   motion-photo `.mp` and any other format included, not just common
-   JPEG/MP4 types.
+5. The integration unpacks every new archive **into a temporary folder
+   under the target directory itself** (not the OS's default temp
+   location - Home Assistant OS mounts `/tmp` as tmpfs, RAM-backed and
+   usually far smaller than an archive; confirmed in practice 2026-09-24
+   that this fails a 50 GB+ archive even with terabytes free on the
+   target disk), files media chronologically into `YYYY/YYYY-MM/` based
+   on the `<file>.json` sidecar (`photoTakenTime`), and skips
+   already-imported files (SHA-256 hash comparison, consistent across
+   backends). Every file in the archive is imported except Takeout's own
+   metadata (`.json` sidecars, `archive_browser.html`) - RAW, `.mkv`,
+   `.webm`, `.tif`, motion-photo `.mp` and any other format included, not
+   just common JPEG/MP4 types. **Target directory needs headroom for
+   this:** roughly 1.2x the size of the largest single archive, on top
+   of the final imported library, since extraction and import happen on
+   the same disk.
 
 #### cURL session
 
