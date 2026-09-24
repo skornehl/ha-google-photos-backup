@@ -109,8 +109,12 @@ def _url_from_curl(text: str) -> str | None:
     if match:
         return match.group(1)
     for url in re.findall(r"https?://[^'\"\s]+", text):
+        # findall's return type isn't narrowed to list[str] from the
+        # pattern alone (mypy sees list[Any] here since it can't count
+        # capture groups statically) - str() is a no-op at runtime for an
+        # already-str value, just satisfies the declared -> str | None.
         if "takeout" in url.lower():
-            return url
+            return str(url)
     return None
 
 
