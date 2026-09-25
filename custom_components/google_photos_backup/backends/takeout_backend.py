@@ -166,19 +166,30 @@ class TakeoutBackend(BackupBackend):
         drive_ids_by_name: dict[str, str] = self.state.get("drive_file_id_by_name", {})
 
         archives = await self.hass.async_add_executor_job(self._list_new_archives, watch_dir)
+        stats.archives_total = len(archives)
         for archive in archives:
             _LOGGER.info("Importing Takeout archive: %s", archive)
+            stats.current_archive = archive.name
+            stats.current_action = "importing"
+            # Extracting a 50 GB+ archive alone can take minutes with no
+            # other signal - report before starting, not just after.
+            self._report_progress(stats)
             try:
                 await self.hass.async_add_executor_job(
                     self._import_archive, archive, target_dir, stats
                 )
             except Exception as err:  # noqa: BLE001
                 stats.errors.append(f"{archive.name}: {err}")
+                stats.current_archive = None
+                stats.current_action = None
                 continue
 
             processed_archives: list[str] = self.state.get("processed_archives", [])
             processed_archives.append(archive.name)
             self.state.set("processed_archives", processed_archives)
+            stats.archives_done += 1
+            stats.current_archive = None
+            stats.current_action = None
             self._report_progress(stats)
 
             # Only clean up from Drive *after* a successful import, never
@@ -271,13 +282,38 @@ class TakeoutBackend(BackupBackend):
                     _LOGGER.info(
                         "Downloading Takeout archive via captured session: %s", name
                     )
-                    await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
+                    stats.current_archive = name
+                    stats.current_action = "downloading"
+                    stats.current_archive_bytes_done = 0
+                    try:
+                        stats.current_archive_bytes_total = int(
+                            resp.headers["Content-Length"]
+                        )
+                    except (KeyError, ValueError):
+                        # Chunked/compressed responses may not carry one -
+                        # the activity sensor just shows bytes done with no
+                        # percentage then, rather than failing the download.
+                        stats.current_archive_bytes_total = None
+                    self._report_progress(stats)
+
+                    def _on_chunk(done: int) -> None:
+                        stats.current_archive_bytes_done = done
+                        self._report_progress(stats)
+
+                    await throttled_stream_to_file(
+                        resp, dest, self.hass, limit_kbps, on_progress=_on_chunk
+                    )
             except Exception as err:  # noqa: BLE001 - surfaced via sensor
                 stats.errors.append(f"{name}: {err}")
+                stats.current_archive = None
+                stats.current_action = None
                 return
 
             consecutive_404 = 0
             seq += 1
+
+        stats.current_archive = None
+        stats.current_action = None
 
     def _list_new_archives(self, watch_dir: Path) -> list[Path]:
         processed = set(self.state.get("processed_archives", []))

@@ -12,6 +12,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTR_CURRENT_ACTIVITY,
+    ATTR_DOWNLOAD_PROGRESS,
     ATTR_FILES_BACKED_UP,
     ATTR_FREE_SPACE,
     ATTR_LAST_ERROR,
@@ -32,6 +34,8 @@ async def async_setup_entry(
             FilesBackedUpSensor(coordinator, entry),
             LastErrorSensor(coordinator, entry),
             FreeSpaceSensor(coordinator, entry),
+            CurrentActivitySensor(coordinator, entry),
+            DownloadProgressSensor(coordinator, entry),
         ]
     )
 
@@ -125,3 +129,77 @@ class FreeSpaceSensor(_BaseSensor):
         if not self.coordinator.data or self.coordinator.data.free_space_bytes is None:
             return None
         return round(self.coordinator.data.free_space_bytes / 1_000_000_000, 2)
+
+
+class CurrentActivitySensor(_BaseSensor):
+    """What the backend is doing right now.
+
+    Exists specifically for the gap FilesBackedUpSensor/LastSyncSensor
+    can't cover: those only change once a whole archive has been
+    imported, but a single Takeout archive download or extraction can
+    run for hours on its own with zero other visible signal (see
+    coordinator.py). "idle" covers both "nothing to do" and "between
+    runs" - distinguishing those isn't worth a third state, the
+    last_sync sensor already answers "when did something last happen".
+    """
+
+    _attr_icon = "mdi:sync"
+
+    def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, ATTR_CURRENT_ACTIVITY)
+
+    @property
+    def native_value(self) -> str:
+        if not self.coordinator.data or not self.coordinator.data.current_action:
+            return "idle"
+        action = self.coordinator.data.current_action
+        return action
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if not self.coordinator.data:
+            return {}
+        return {
+            "current_archive": self.coordinator.data.current_archive,
+            "archives_done": self.coordinator.data.archives_done,
+            "archives_total": self.coordinator.data.archives_total,
+        }
+
+
+class DownloadProgressSensor(_BaseSensor):
+    """Percentage of the archive currently being downloaded, if known.
+
+    Only meaningful while current_action == "downloading" *and* the
+    server sent a Content-Length header (not guaranteed - see
+    takeout_backend.py) - unavailable (None) otherwise rather than
+    showing a stale or misleading number.
+    """
+
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:progress-download"
+
+    def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, ATTR_DOWNLOAD_PROGRESS)
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data
+        if (
+            not data
+            or data.current_action != "downloading"
+            or not data.current_archive_bytes_total
+        ):
+            return None
+        return round(
+            100 * data.current_archive_bytes_done / data.current_archive_bytes_total, 1
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if not self.coordinator.data:
+            return {}
+        return {
+            "bytes_done": self.coordinator.data.current_archive_bytes_done,
+            "bytes_total": self.coordinator.data.current_archive_bytes_total,
+        }

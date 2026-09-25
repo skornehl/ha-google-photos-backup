@@ -21,7 +21,8 @@ custom_components/google_photos_backup/
 ├── config_flow.py           # backend selection + backend-specific options
 ├── const.py
 ├── coordinator.py           # DataUpdateCoordinator, persisted sync state
-├── sensor.py                # last_sync, files_backed_up, last_error, free_space
+├── sensor.py                # last_sync, files_backed_up, last_error, free_space,
+│                             # current_activity, download_progress
 ├── services.yaml
 ├── strings.json / translations/{en,de}.json
 └── backends/
@@ -389,7 +390,13 @@ derived from the JSON).
   practice 2026-09-24: a restart mid-backup got the whole config entry
   cancelled and dumped into `setup_error`). Entities show no data for a
   moment after setup/restart instead, then fill in as the coordinator's
-  first refresh reports progress - normal, not an error.
+  first refresh reports progress - normal, not an error. `sensor.*_current_activity`
+  (`idle` / `downloading` / `importing`, with the archive name and
+  `archives_done`/`archives_total` as attributes) and
+  `sensor.*_download_progress` (percent through the archive currently
+  downloading, when the server sends a `Content-Length`) exist
+  specifically to cover *within* a single multi-hour archive - the other
+  sensors above only change once a whole archive has been imported.
 - `library_api`/`rclone` are deliberately fully implemented (the spec
   calls for them), even though their practical value for a full backup is
   low under Google's current API policy - this could change if Google

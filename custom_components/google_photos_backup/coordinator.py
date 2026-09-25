@@ -48,22 +48,28 @@ class BackupData:
     last_run_errors: list[str]
     free_space_bytes: int | None
     in_progress: bool = False
+    #: What the backend is doing right now - see BackupStats in
+    #: backends/base.py for the field-by-field meaning. All reset to
+    #: their idle defaults once a run finishes (see _async_update_data).
+    current_archive: str | None = None
+    current_action: str | None = None
+    current_archive_bytes_done: int = 0
+    current_archive_bytes_total: int | None = None
+    archives_total: int = 0
+    archives_done: int = 0
 
 
 class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
     """Owns the persisted sync state and the active backend instance.
 
-    Sensors update once per completed run, not continuously during one
-    (see issue #21): a long initial import can therefore sit "quiet" for
-    a while before the numbers jump. That's a deliberate trade-off -
-    mid-run progress would mean either the backend reaching back into
-    the coordinator to push partial BackupStats (coupling the two in
-    the one direction this design deliberately avoids - see
-    backends/base.py) or a second state channel next to
-    _async_update_data's return value. The last_sync sensor's timestamp
-    plus the archive-level INFO logs cover "is it doing anything?"
-    well enough in practice. Worth revisiting only alongside a real
-    progress API on BackupBackend.
+    files_backed_up_total and friends still only update once per
+    completed run (see issue #21): a long initial import can sit "quiet"
+    on those for a while before the numbers jump. current_archive/
+    current_action/current_archive_bytes_* are the exception - the
+    backend reports those via _handle_progress *during* a run (per
+    archive downloaded/imported, and per chunk within a single archive's
+    download), specifically to cover the gap the above leaves: a single
+    50 GB+ archive can otherwise show no movement at all for hours.
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -138,6 +144,12 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             last_run_errors=stats.errors,
             free_space_bytes=self.data.free_space_bytes if self.data else None,
             in_progress=in_progress,
+            current_archive=stats.current_archive,
+            current_action=stats.current_action,
+            current_archive_bytes_done=stats.current_archive_bytes_done,
+            current_archive_bytes_total=stats.current_archive_bytes_total,
+            archives_total=stats.archives_total,
+            archives_done=stats.archives_done,
         )
 
     async def _async_update_data(self) -> BackupData:

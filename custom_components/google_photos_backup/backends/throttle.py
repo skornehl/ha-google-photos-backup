@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import ClientResponse
@@ -69,6 +70,7 @@ async def throttled_stream_to_file(
     chunk_size: int = DOWNLOAD_CHUNK_SIZE,
     flush_size: int = DRIVE_DOWNLOAD_FLUSH_SIZE,
     pacer: BandwidthPacer | None = None,
+    on_progress: Callable[[int], None] | None = None,
 ) -> int:
     """Stream resp's body to dest_path, paced to `limit_kbps` (KiB/s,
     <=0 = unlimited). Buffers up to `flush_size` in memory before each
@@ -76,6 +78,13 @@ async def throttled_stream_to_file(
     RAM instead of being held in full, while still avoiding a write (and
     executor round-trip) per single network chunk. Returns the total
     number of bytes written.
+
+    `on_progress`, if given, is called with the cumulative byte count after
+    every chunk read - cheap (the caller decides how/whether to throttle
+    what it does with it, see coordinator._handle_progress), and the only
+    way to show any movement at all during a single archive's download,
+    which can otherwise run for hours with no other signal (issue #21
+    covered *between* archives, not within one).
 
     Writes to a `<dest_path>.part` sibling and only `os.replace()`s it
     onto `dest_path` after the transfer completes fully - so a process
@@ -104,6 +113,8 @@ async def throttled_stream_to_file(
             total += len(chunk)
             if pacer is not None:
                 await pacer.account(len(chunk))
+            if on_progress is not None:
+                on_progress(total)
             if len(buffer) >= flush_size:
                 await hass.async_add_executor_job(
                     _flush, bytes(buffer), "ab" if wrote_anything else "wb"
