@@ -29,7 +29,12 @@ class BackupStats:
     #: sensor - a single huge archive download or extraction can otherwise
     #: sit for hours between the coarser files_downloaded/files_skipped
     #: updates above, which only change once a whole archive is imported.
-    #: current_action is "downloading" | "importing" | None (idle).
+    #: current_action is "downloading" | "extracting" | "moving" | None
+    #: (idle). "extracting" and "moving" are two sub-phases of what used
+    #: to be a single opaque "importing" - unpacking a 50GB+ archive with
+    #: tens of thousands of members and then moving each matched file
+    #: into the target library are each slow enough on their own to need
+    #: their own progress, not just "importing, no further detail".
     current_archive: str | None = None
     current_action: str | None = None
     current_archive_bytes_done: int = 0
@@ -38,6 +43,16 @@ class BackupStats:
     #: only known once the watch_dir scan has run, so both start at 0.
     archives_total: int = 0
     archives_done: int = 0
+    #: Members extracted from the archive currently being unpacked, vs.
+    #: the total member count (known upfront from the archive's own
+    #: index, unlike the download byte total which depends on the server
+    #: sending Content-Length).
+    extract_files_done: int = 0
+    extract_files_total: int = 0
+    #: Matched media files moved from the extraction temp dir into the
+    #: target library for the archive currently being processed.
+    import_files_done: int = 0
+    import_files_total: int = 0
 
     def merge(self, other: BackupStats) -> None:
         self.files_downloaded += other.files_downloaded
@@ -112,9 +127,25 @@ class BackupBackend(ABC):
         Deliberately one-directional: the backend hands data outward and
         never reads coordinator state, so the dependency arrow this
         architecture avoids stays pointing the right way.
+
+        Must be called from the event loop thread - the coordinator's
+        on_progress callback ends up at DataUpdateCoordinator's
+        @callback-decorated async_set_updated_data(), which is
+        event-loop-only. Code that runs in an executor thread (anything
+        wrapped in hass.async_add_executor_job, e.g. takeout_backend's
+        archive extraction/import) must use _report_progress_threadsafe
+        instead.
         """
         if self._on_progress is not None:
             self._on_progress(stats)
+
+    def _report_progress_threadsafe(self, stats: BackupStats) -> None:
+        """Like _report_progress, but callable from a worker thread -
+        marshals onto the event loop via call_soon_threadsafe rather than
+        calling straight through. See _report_progress's docstring for
+        why this distinction matters."""
+        if self._on_progress is not None:
+            self.hass.loop.call_soon_threadsafe(self._on_progress, stats)
 
     def _option(self, key: str, default: Any = None) -> Any:
         """Read a config value, preferring an options-flow override (set

@@ -57,6 +57,10 @@ class BackupData:
     current_archive_bytes_total: int | None = None
     archives_total: int = 0
     archives_done: int = 0
+    extract_files_done: int = 0
+    extract_files_total: int = 0
+    import_files_done: int = 0
+    import_files_total: int = 0
 
 
 class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
@@ -65,11 +69,13 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
     files_backed_up_total and friends still only update once per
     completed run (see issue #21): a long initial import can sit "quiet"
     on those for a while before the numbers jump. current_archive/
-    current_action/current_archive_bytes_* are the exception - the
-    backend reports those via _handle_progress *during* a run (per
-    archive downloaded/imported, and per chunk within a single archive's
-    download), specifically to cover the gap the above leaves: a single
-    50 GB+ archive can otherwise show no movement at all for hours.
+    current_action/current_archive_bytes_*/extract_files_*/import_files_*
+    are the exception - the backend reports those via _handle_progress
+    *during* a run (per archive, per chunk within a download, and per
+    ~50 members within an extraction or file-move pass), specifically to
+    cover the gap the above leaves: a single 50 GB+ archive can otherwise
+    show no movement at all for hours, whether it's still downloading,
+    being unpacked, or having its files moved into the target library.
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -150,6 +156,10 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             current_archive_bytes_total=stats.current_archive_bytes_total,
             archives_total=stats.archives_total,
             archives_done=stats.archives_done,
+            extract_files_done=stats.extract_files_done,
+            extract_files_total=stats.extract_files_total,
+            import_files_done=stats.import_files_done,
+            import_files_total=stats.import_files_total,
         )
 
     async def _async_update_data(self) -> BackupData:

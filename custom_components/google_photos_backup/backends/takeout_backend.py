@@ -181,9 +181,13 @@ class TakeoutBackend(BackupBackend):
         for archive in archives:
             _LOGGER.info("Importing Takeout archive: %s", archive)
             stats.current_archive = archive.name
-            stats.current_action = "importing"
-            # Extracting a 50 GB+ archive alone can take minutes with no
-            # other signal - report before starting, not just after.
+            # current_action itself is set by _extract/_import_archive's
+            # move loop just below (they run in the executor thread and
+            # know which of the two sub-phases they're actually in) -
+            # reporting current_archive alone here still lets the
+            # activity sensor show "archive N of M" the instant this
+            # archive starts, without waiting for that first threadsafe
+            # report to land.
             self._report_progress(stats)
             try:
                 await self.hass.async_add_executor_job(
@@ -193,6 +197,8 @@ class TakeoutBackend(BackupBackend):
                 stats.errors.append(f"{archive.name}: {err}")
                 stats.current_archive = None
                 stats.current_action = None
+                stats.extract_files_done = stats.extract_files_total = 0
+                stats.import_files_done = stats.import_files_total = 0
                 continue
 
             processed_archives: list[str] = self.state.get("processed_archives", [])
@@ -201,6 +207,8 @@ class TakeoutBackend(BackupBackend):
             stats.archives_done += 1
             stats.current_archive = None
             stats.current_action = None
+            stats.extract_files_done = stats.extract_files_total = 0
+            stats.import_files_done = stats.import_files_total = 0
             self._report_progress(stats)
 
             # Only clean up from Drive *after* a successful import, never
@@ -523,12 +531,21 @@ class TakeoutBackend(BackupBackend):
         with tempfile.TemporaryDirectory(prefix="gpb_takeout_", dir=target_dir) as tmp:
             tmp_path = Path(tmp)
             self._check_free_space(archive, tmp_path)
-            self._extract(archive, tmp_path)
+            self._extract(archive, tmp_path, stats)
             media_files = [
                 p for p in tmp_path.rglob("*") if p.is_file() and _is_takeout_content(p)
             ]
-            for media_file in media_files:
+            stats.current_action = "moving"
+            stats.import_files_total = len(media_files)
+            stats.import_files_done = 0
+            self._report_progress_threadsafe(stats)
+            for i, media_file in enumerate(media_files, 1):
                 self._import_media_file(media_file, target_dir, stats)
+                stats.import_files_done = i
+                # See _extract's identical throttle for why every-50th
+                # rather than every file.
+                if i % 50 == 0 or i == len(media_files):
+                    self._report_progress_threadsafe(stats)
 
     @staticmethod
     def _check_free_space(archive: Path, extract_dir: Path) -> None:
@@ -564,18 +581,45 @@ class TakeoutBackend(BackupBackend):
                 "archive is left in place and retried on the next run."
             )
 
-    @staticmethod
-    def _extract(archive: Path, dest: Path) -> None:
+    def _extract(self, archive: Path, dest: Path, stats: BackupStats) -> None:
+        """Unpack `archive` into `dest`, reporting member-count progress
+        along the way (extract_files_done/extract_files_total) - the
+        member count is known upfront from the archive's own index,
+        unlike the download's byte total which depends on the server
+        sending Content-Length. Reported every 50th member rather than
+        every single one: a 20k+-member archive would otherwise mean
+        20k+ thread hops onto the event loop for no visible UI benefit,
+        since PROGRESS_MIN_INTERVAL_SECONDS already throttles what
+        actually gets written to the sensors."""
+        stats.current_action = "extracting"
         name = archive.name.lower()
         if name.endswith(".zip"):
             # zipfile has sanitized member paths (strips '..'/absolute
             # components) in the stdlib for a long time - no extra check
             # needed here, unlike tarfile below.
             with zipfile.ZipFile(archive) as zf:
-                zf.extractall(dest)
+                members = zf.infolist()
+                stats.extract_files_total = len(members)
+                stats.extract_files_done = 0
+                self._report_progress_threadsafe(stats)
+                for i, member in enumerate(members, 1):
+                    zf.extract(member, dest)
+                    stats.extract_files_done = i
+                    if i % 50 == 0 or i == len(members):
+                        self._report_progress_threadsafe(stats)
         elif name.endswith(".tgz") or name.endswith(".tar.gz"):
+            # _safe_tar_extractall does its own security-relevant
+            # member-by-member checking (path traversal / symlinks,
+            # CVE-2007-4559) - left untouched rather than restructured
+            # for per-member progress, so only a before/after report
+            # here rather than the zip path's granular one.
             with tarfile.open(archive, "r:gz") as tf:
+                stats.extract_files_total = len(tf.getmembers())
+                stats.extract_files_done = 0
+                self._report_progress_threadsafe(stats)
                 _safe_tar_extractall(tf, dest)
+                stats.extract_files_done = stats.extract_files_total
+                self._report_progress_threadsafe(stats)
         else:
             raise ValueError(f"Unknown archive format: {archive.name}")
 

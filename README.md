@@ -22,7 +22,7 @@ custom_components/google_photos_backup/
 ├── const.py
 ├── coordinator.py           # DataUpdateCoordinator, persisted sync state
 ├── sensor.py                # last_sync, files_backed_up, last_error, free_space,
-│                             # current_activity, download_progress
+│                             # current_activity, progress_percent
 ├── repairs.py               # fix flow for the curl_session_expired repair issue
 ├── services.yaml
 ├── strings.json / translations/{en,de}.json
@@ -203,7 +203,9 @@ through this exact rclone remote - see rclone docs
      export.
    - Enable **Drive sync** during setup - see "Google Drive sync" below.
 4. Config flow: backend `takeout`, target directory, watch directory,
-   interval, optionally "delete archive after import".
+   interval, optionally "delete archive after import" - the last one can
+   also be changed later via Configure, no need to remove and re-add the
+   integration for it.
 5. The integration unpacks every new archive **into a temporary folder
    under the target directory itself** (not the OS's default temp
    location - Home Assistant OS mounts `/tmp` as tmpfs, RAM-backed and
@@ -397,12 +399,18 @@ derived from the JSON).
   cancelled and dumped into `setup_error`). Entities show no data for a
   moment after setup/restart instead, then fill in as the coordinator's
   first refresh reports progress - normal, not an error. `sensor.*_current_activity`
-  (`idle` / `downloading` / `importing`, with the archive name and
-  `archives_done`/`archives_total` as attributes) and
-  `sensor.*_download_progress` (percent through the archive currently
-  downloading, when the server sends a `Content-Length`) exist
-  specifically to cover *within* a single multi-hour archive - the other
-  sensors above only change once a whole archive has been imported.
+  (`idle` / `downloading` / `extracting` / `moving`, with the archive name
+  and `archives_done`/`archives_total` as attributes) and
+  `sensor.*_progress_percent` (percent through whichever of those is
+  currently happening - by bytes for a download when the server sends a
+  `Content-Length`, by member/file count for extracting or moving, both
+  known upfront from the archive's own index) exist specifically to cover
+  *within* a single multi-hour archive - the other sensors above only
+  change once a whole archive has been imported. `extracting` and
+  `moving` are two distinct phases of what a single archive import does
+  (unpack, then move each matched file into the target library) - each
+  slow enough on its own with a large archive to want its own progress
+  rather than one opaque "importing".
 - `library_api`/`rclone` are deliberately fully implemented (the spec
   calls for them), even though their practical value for a full backup is
   low under Google's current API policy - this could change if Google

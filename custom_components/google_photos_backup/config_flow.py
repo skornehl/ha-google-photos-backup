@@ -335,8 +335,9 @@ class GooglePhotosBackupFlowHandler(
 
 
 class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
-    """Lets the user change sync interval, bandwidth limit, and (for
-    takeout with Drive sync) the Drive folder without re-running setup.
+    """Lets the user change sync interval, bandwidth limit, delete-after-
+    import (takeout), and (for takeout with Drive sync) the Drive folder
+    without re-running setup.
 
     Whether Drive sync itself is enabled is NOT editable here - toggling it
     on needs a fresh OAuth round trip, which an options flow can't do; to
@@ -372,6 +373,14 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
             ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY)),
         }
         if self.config_entry.data.get(CONF_BACKEND) == BACKEND_TAKEOUT:
+            schema_dict[
+                vol.Optional(
+                    CONF_TAKEOUT_DELETE_AFTER_IMPORT,
+                    default=_current(
+                        CONF_TAKEOUT_DELETE_AFTER_IMPORT, DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT
+                    ),
+                )
+            ] = bool
             schema_dict[
                 vol.Optional(
                     CONF_TAKEOUT_CURL_SESSION, default=_current(CONF_TAKEOUT_CURL_SESSION, "")

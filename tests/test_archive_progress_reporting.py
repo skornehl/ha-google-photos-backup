@@ -1,9 +1,9 @@
 """Tests for archive-level progress during TakeoutBackend.async_run_backup.
 
-Downloads and single-archive imports each report their own progress (see
-test_curl_session_download.py and test_progress_reporting.py) - this
-covers the layer above: archives_total/archives_done and
-current_action == "importing" while async_run_backup works through the
+Downloads report their own progress (see test_curl_session_download.py);
+a single archive's extraction/move-into-library report theirs (see
+test_archive_extract_and_move_progress.py). This covers the layer above:
+archives_total/archives_done while async_run_backup works through the
 list of archives found in watch_dir.
 """
 from __future__ import annotations
@@ -41,10 +41,14 @@ def _make_backend(watch_dir: Path, target_dir: Path) -> TakeoutBackend:
     )
     backend = TakeoutBackend(MagicMock(), entry, SyncStateStore({}))
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    # _extract/the move loop report via _report_progress_threadsafe, which
+    # marshals onto hass.loop.call_soon_threadsafe - make that call
+    # straight through synchronously rather than wiring a real event loop.
+    backend.hass.loop = SimpleNamespace(call_soon_threadsafe=lambda fn, *a: fn(*a))
     return backend
 
 
-async def test_archive_counts_and_action_move_through_the_import_loop(tmp_path: Path):
+async def test_archive_counts_move_through_the_import_loop(tmp_path: Path):
     watch_dir = tmp_path / "watch"
     watch_dir.mkdir()
     target_dir = tmp_path / "target"
@@ -63,13 +67,20 @@ async def test_archive_counts_and_action_move_through_the_import_loop(tmp_path: 
     assert stats.files_downloaded == 2
     assert stats.archives_total == 2
     assert stats.archives_done == 2
-    # Reported "importing archive 1 of 2" before archive 1 was done...
-    assert (2, 0, "importing", "takeout-20260923T000000Z-1-001.zip") in snapshots
-    # ...and "importing archive 2 of 2" before archive 2 was done.
-    assert (2, 1, "importing", "takeout-20260923T000000Z-1-002.zip") in snapshots
+    # Both sub-phases were seen, against the right archive, while archive
+    # 1 was still in progress (archives_done == 0).
+    assert (2, 0, "extracting", "takeout-20260923T000000Z-1-001.zip") in snapshots
+    assert (2, 0, "moving", "takeout-20260923T000000Z-1-001.zip") in snapshots
+    # And again for archive 2, after archive 1 finished (archives_done == 1).
+    assert (2, 1, "extracting", "takeout-20260923T000000Z-1-002.zip") in snapshots
+    assert (2, 1, "moving", "takeout-20260923T000000Z-1-002.zip") in snapshots
     # Idle again once the whole run has finished.
     assert stats.current_action is None
     assert stats.current_archive is None
+    assert stats.extract_files_done == 0
+    assert stats.extract_files_total == 0
+    assert stats.import_files_done == 0
+    assert stats.import_files_total == 0
 
 
 async def test_a_failed_archive_still_clears_current_action(tmp_path: Path):
