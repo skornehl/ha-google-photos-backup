@@ -67,6 +67,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from ..const import (
@@ -83,6 +84,7 @@ from ..const import (
     DEFAULT_TAKEOUT_CURL_MAX_FILES,
     DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
+    DOMAIN,
     DOWNLOAD_TIMEOUT,
     DRIVE_API_BASE,
     OAUTH2_SCOPES_DRIVE,
@@ -94,6 +96,15 @@ from .fsutil import dest_dir_for_date, ensure_target_dir, sha256_file, unique_de
 from .throttle import throttled_stream_to_file
 
 _LOGGER = logging.getLogger(__name__)
+
+# Repair issue raised when the captured browser session (see
+# _download_via_curl_session below) stops working - expected to happen
+# routinely (the cookie is only good for about an hour), not a bug, but
+# easy to miss if the only signal is the last_error sensor. See repairs.py
+# for the fix flow that lets a fresh cURL/PowerShell command be pasted
+# directly from Settings -> System -> Repairs.
+def _curl_session_issue_id(entry_id: str) -> str:
+    return f"curl_session_expired_{entry_id}"
 
 # Takeout's own non-media files: JSON sidecars (per item, per album
 # `metadata.json`, `print-subscriptions.json`, ...) and the
@@ -270,6 +281,7 @@ class TakeoutBackend(BackupBackend):
                             "takeout_curl_session. Already-downloaded files "
                             "are kept, the next run resumes from here."
                         )
+                        self._raise_curl_session_expired_issue()
                         return
                     resp.raise_for_status()
                     if "html" in resp.headers.get("Content-Type", "").lower():
@@ -278,6 +290,7 @@ class TakeoutBackend(BackupBackend):
                             "archive - the session has likely expired, see "
                             "above."
                         )
+                        self._raise_curl_session_expired_issue()
                         return
                     _LOGGER.info(
                         "Downloading Takeout archive via captured session: %s", name
@@ -303,6 +316,13 @@ class TakeoutBackend(BackupBackend):
                     await throttled_stream_to_file(
                         resp, dest, self.hass, limit_kbps, on_progress=_on_chunk
                     )
+                    # A chunk just downloaded successfully with this
+                    # cookie - any previously-raised "session expired"
+                    # repair issue no longer applies. async_delete_issue
+                    # is a no-op if there is nothing to delete.
+                    ir.async_delete_issue(
+                        self.hass, DOMAIN, _curl_session_issue_id(self.entry.entry_id)
+                    )
             except Exception as err:  # noqa: BLE001 - surfaced via sensor
                 stats.errors.append(f"{name}: {err}")
                 stats.current_archive = None
@@ -314,6 +334,19 @@ class TakeoutBackend(BackupBackend):
 
         stats.current_archive = None
         stats.current_action = None
+
+    def _raise_curl_session_expired_issue(self) -> None:
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            _curl_session_issue_id(self.entry.entry_id),
+            is_fixable=True,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="curl_session_expired",
+            translation_placeholders={"title": self.entry.title},
+            data={"entry_id": self.entry.entry_id},
+        )
 
     def _list_new_archives(self, watch_dir: Path) -> list[Path]:
         processed = set(self.state.get("processed_archives", []))

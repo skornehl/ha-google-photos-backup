@@ -11,12 +11,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 import custom_components.google_photos_backup.backends.takeout_backend as takeout_module
 from custom_components.google_photos_backup.backends.base import BackupStats, SyncStateStore
 from custom_components.google_photos_backup.backends.takeout_backend import TakeoutBackend
 from custom_components.google_photos_backup.const import (
     CONF_TAKEOUT_CURL_SESSION,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_issue_registry(monkeypatch):
+    """The real issue_registry helpers need a real hass.data/storage - not
+    worth setting up for tests that aren't about the repair issue itself.
+    Callers that *are* about it (see the curl_session_expired_issue tests
+    below) grab these mocks directly off takeout_module.ir instead of
+    relying on this fixture's return value, so a plain autouse is enough."""
+    monkeypatch.setattr(takeout_module.ir, "async_create_issue", MagicMock())
+    monkeypatch.setattr(takeout_module.ir, "async_delete_issue", MagicMock())
 
 _CURL = (
     "curl 'https://takeout-download.usercontent.google.com/download/"
@@ -62,7 +75,10 @@ def _fake_response(
 
 def _make_backend(tmp_path: Path, curl_session: str) -> TakeoutBackend:
     entry = SimpleNamespace(
-        data={}, options={CONF_TAKEOUT_CURL_SESSION: curl_session}
+        entry_id="test_entry_id",
+        title="Test entry",
+        data={},
+        options={CONF_TAKEOUT_CURL_SESSION: curl_session},
     )
     return TakeoutBackend(MagicMock(), entry, SyncStateStore({}))
 
@@ -220,3 +236,55 @@ async def test_reports_progress_during_and_resets_after_download(monkeypatch, tm
     # Idle again once the whole pass (all archives) has finished.
     assert stats.current_archive is None
     assert stats.current_action is None
+
+
+async def test_expired_session_raises_a_repair_issue(monkeypatch, tmp_path: Path):
+    fake_session = MagicMock()
+    fake_session.get = lambda url, headers=None, **kwargs: _fake_response(403)
+    monkeypatch.setattr(takeout_module, "async_get_clientsession", lambda hass: fake_session)
+
+    backend = _make_backend(tmp_path, _CURL)
+    backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    stats = BackupStats()
+
+    await backend._download_via_curl_session(tmp_path, stats)
+
+    takeout_module.ir.async_create_issue.assert_called_once()
+    _, kwargs = takeout_module.ir.async_create_issue.call_args
+    assert kwargs["translation_key"] == "curl_session_expired"
+    assert kwargs["is_fixable"] is True
+    assert kwargs["data"] == {"entry_id": "test_entry_id"}
+    takeout_module.ir.async_delete_issue.assert_not_called()
+
+
+async def test_html_response_also_raises_a_repair_issue(monkeypatch, tmp_path: Path):
+    fake_session = MagicMock()
+    fake_session.get = lambda url, headers=None, **kwargs: _fake_response(
+        200, content_type="text/html; charset=utf-8"
+    )
+    monkeypatch.setattr(takeout_module, "async_get_clientsession", lambda hass: fake_session)
+
+    backend = _make_backend(tmp_path, _CURL)
+    backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    stats = BackupStats()
+
+    await backend._download_via_curl_session(tmp_path, stats)
+
+    takeout_module.ir.async_create_issue.assert_called_once()
+
+
+async def test_successful_download_clears_any_expired_session_issue(monkeypatch, tmp_path: Path):
+    fake_session = MagicMock()
+    fake_session.get = lambda url, headers=None, **kwargs: _fake_response(200)
+    monkeypatch.setattr(takeout_module, "async_get_clientsession", lambda hass: fake_session)
+
+    backend = _make_backend(tmp_path, _CURL)
+    backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    stats = BackupStats()
+
+    await backend._download_via_curl_session(tmp_path, stats)
+
+    takeout_module.ir.async_create_issue.assert_not_called()
+    takeout_module.ir.async_delete_issue.assert_called_with(
+        backend.hass, takeout_module.DOMAIN, "curl_session_expired_test_entry_id"
+    )
