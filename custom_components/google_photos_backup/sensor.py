@@ -13,11 +13,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_CURRENT_ACTIVITY,
-    ATTR_DOWNLOAD_PROGRESS,
     ATTR_FILES_BACKED_UP,
     ATTR_FREE_SPACE,
     ATTR_LAST_ERROR,
     ATTR_LAST_SYNC,
+    ATTR_PROGRESS_PERCENT,
     CONF_BACKEND,
     DOMAIN,
 )
@@ -35,7 +35,7 @@ async def async_setup_entry(
             LastErrorSensor(coordinator, entry),
             FreeSpaceSensor(coordinator, entry),
             CurrentActivitySensor(coordinator, entry),
-            DownloadProgressSensor(coordinator, entry),
+            ProgressPercentSensor(coordinator, entry),
         ]
     )
 
@@ -136,11 +136,17 @@ class CurrentActivitySensor(_BaseSensor):
 
     Exists specifically for the gap FilesBackedUpSensor/LastSyncSensor
     can't cover: those only change once a whole archive has been
-    imported, but a single Takeout archive download or extraction can
-    run for hours on its own with zero other visible signal (see
-    coordinator.py). "idle" covers both "nothing to do" and "between
-    runs" - distinguishing those isn't worth a third state, the
+    imported, but a single Takeout archive download, extraction, or
+    file-move pass can run for hours on its own with zero other visible
+    signal (see coordinator.py). "idle" covers both "nothing to do" and
+    "between runs" - distinguishing those isn't worth a fifth state, the
     last_sync sensor already answers "when did something last happen".
+
+    "importing" used to be one opaque state covering both unpacking an
+    archive and moving its matched files into the target library -
+    split into "extracting"/"moving" since each is slow enough on its
+    own (tens of thousands of members/files) to want its own progress,
+    not just "importing, no further detail".
     """
 
     _attr_icon = "mdi:sync"
@@ -166,40 +172,54 @@ class CurrentActivitySensor(_BaseSensor):
         }
 
 
-class DownloadProgressSensor(_BaseSensor):
-    """Percentage of the archive currently being downloaded, if known.
+class ProgressPercentSensor(_BaseSensor):
+    """Percentage through whatever current_activity currently says is
+    happening - downloading (by bytes), extracting, or moving (both by
+    file/member count, known upfront from the archive's own index).
 
-    Only meaningful while current_action == "downloading" *and* the
-    server sent a Content-Length header (not guaranteed - see
-    takeout_backend.py) - unavailable (None) otherwise rather than
-    showing a stale or misleading number.
+    Unavailable (None) while idle, or while downloading a response with
+    no Content-Length header (not guaranteed - see takeout_backend.py) -
+    deliberately unavailable rather than a stale or misleading number.
     """
 
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:progress-download"
+    _attr_icon = "mdi:progress-check"
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, ATTR_DOWNLOAD_PROGRESS)
+        super().__init__(coordinator, entry, ATTR_PROGRESS_PERCENT)
 
     @property
     def native_value(self) -> float | None:
         data = self.coordinator.data
-        if (
-            not data
-            or data.current_action != "downloading"
-            or not data.current_archive_bytes_total
-        ):
+        if not data:
             return None
-        return round(
-            100 * data.current_archive_bytes_done / data.current_archive_bytes_total, 1
-        )
+        if data.current_action == "downloading":
+            if not data.current_archive_bytes_total:
+                return None
+            done, total = data.current_archive_bytes_done, data.current_archive_bytes_total
+        elif data.current_action == "extracting":
+            if not data.extract_files_total:
+                return None
+            done, total = data.extract_files_done, data.extract_files_total
+        elif data.current_action == "moving":
+            if not data.import_files_total:
+                return None
+            done, total = data.import_files_done, data.import_files_total
+        else:
+            return None
+        return round(100 * done / total, 1)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         if not self.coordinator.data:
             return {}
+        data = self.coordinator.data
         return {
-            "bytes_done": self.coordinator.data.current_archive_bytes_done,
-            "bytes_total": self.coordinator.data.current_archive_bytes_total,
+            "download_bytes_done": data.current_archive_bytes_done,
+            "download_bytes_total": data.current_archive_bytes_total,
+            "extract_files_done": data.extract_files_done,
+            "extract_files_total": data.extract_files_total,
+            "move_files_done": data.import_files_done,
+            "move_files_total": data.import_files_total,
         }

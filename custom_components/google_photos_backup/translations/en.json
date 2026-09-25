@@ -135,8 +135,8 @@
       "current_activity": {
         "name": "Current activity"
       },
-      "download_progress": {
-        "name": "Download progress"
+      "progress_percent": {
+        "name": "Progress percent"
       }
     }
   },

@@ -34,10 +34,9 @@ def test_extraction_temp_dir_is_created_under_target_dir(monkeypatch, tmp_path: 
     seen_extract_dirs: list[Path] = []
     original_extract = TakeoutBackend._extract
 
-    @staticmethod
-    def _spying_extract(archive_path: Path, dest: Path) -> None:
+    def _spying_extract(self, archive_path: Path, dest: Path, stats: BackupStats) -> None:
         seen_extract_dirs.append(dest)
-        original_extract(archive_path, dest)
+        original_extract(self, archive_path, dest, stats)
 
     monkeypatch.setattr(TakeoutBackend, "_extract", _spying_extract)
 
