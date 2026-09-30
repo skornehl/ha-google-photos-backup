@@ -170,7 +170,7 @@ STORAGE_VERSION: Final = 1
 STORAGE_KEY_TEMPLATE: Final = f"{DOMAIN}_{{entry_id}}"
 
 # --- misc --------------------------------------------------------------------
-PLATFORMS: Final = ["sensor"]
+PLATFORMS: Final = ["sensor", "switch"]
 SERVICE_BACKUP_NOW: Final = "backup_now"
 SERVICE_START_PICKER_SESSION: Final = "start_picker_session"
 

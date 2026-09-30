@@ -52,6 +52,7 @@ Known Takeout quirks handled here:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -164,74 +165,105 @@ class TakeoutBackend(BackupBackend):
             CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC, DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC
         )
 
-        # Both of these only ever add files to watch_dir - the archive
-        # scan/import below then treats them exactly like anything the
-        # user dropped in manually, so there's exactly one import code
-        # path regardless of how an archive got here.
-        await self._download_via_curl_session(watch_dir, stats)
-        await self._sync_drive_folder(watch_dir, stats)
+        # Download and import now run concurrently rather than as two
+        # strictly separate phases (download everything, THEN import
+        # everything) - a producer/consumer pair over `queue`, so archive 2
+        # can start downloading while archive 1 is already being
+        # extracted/moved, instead of import sitting idle until every
+        # single archive has finished downloading first. Both download
+        # sources only ever add files to watch_dir and then put the
+        # resulting Path onto the queue - the consumer below treats an
+        # archive exactly the same regardless of which source (or manual
+        # drop, picked up as "pre-existing" just below) produced it, so
+        # there's exactly one import code path.
+        queue: asyncio.Queue[Path | None] = asyncio.Queue()
+
+        pre_existing = await self.hass.async_add_executor_job(self._list_new_archives, watch_dir)
+        for archive in pre_existing:
+            queue.put_nowait(archive)
+        stats.archives_total = len(pre_existing)
+
+        async def _produce() -> None:
+            await self._download_via_curl_session(watch_dir, stats, queue)
+            await self._sync_drive_folder(watch_dir, stats, queue)
+            # Sentinel: tells the consumer no more archives are coming, so
+            # it can stop waiting on the queue once it has drained what's
+            # already on it, rather than blocking forever.
+            await queue.put(None)
 
         # name -> Drive file ID, persisted across runs so an archive that
         # downloaded fine but failed to *import* last run still gets
         # cleaned up from Drive once it does import successfully.
         drive_ids_by_name: dict[str, str] = self.state.get("drive_file_id_by_name", {})
 
-        archives = await self.hass.async_add_executor_job(self._list_new_archives, watch_dir)
-        stats.archives_total = len(archives)
-        for archive in archives:
-            _LOGGER.info("Importing Takeout archive: %s", archive)
-            stats.current_archive = archive.name
-            # current_action itself is set by _extract/_import_archive's
-            # move loop just below (they run in the executor thread and
-            # know which of the two sub-phases they're actually in) -
-            # reporting current_archive alone here still lets the
-            # activity sensor show "archive N of M" the instant this
-            # archive starts, without waiting for that first threadsafe
-            # report to land.
-            self._report_progress(stats)
-            try:
-                await self.hass.async_add_executor_job(
-                    self._import_archive, archive, target_dir, stats
-                )
-            except Exception as err:  # noqa: BLE001
-                stats.errors.append(f"{archive.name}: {err}")
+        async def _consume() -> None:
+            while True:
+                archive = await queue.get()
+                if archive is None:
+                    return
+
+                _LOGGER.info("Importing Takeout archive: %s", archive)
+                stats.current_archive = archive.name
+                # current_action itself is set by _extract/_import_archive's
+                # move loop just below (they run in the executor thread and
+                # know which of the two sub-phases they're actually in) -
+                # reporting current_archive alone here still lets the
+                # activity sensor show "archive N of M" the instant this
+                # archive starts, without waiting for that first threadsafe
+                # report to land.
+                self._report_progress(stats)
+                try:
+                    await self.hass.async_add_executor_job(
+                        self._import_archive, archive, target_dir, stats
+                    )
+                except Exception as err:  # noqa: BLE001
+                    stats.errors.append(f"{archive.name}: {err}")
+                    stats.current_archive = None
+                    stats.current_action = None
+                    stats.extract_files_done = stats.extract_files_total = 0
+                    stats.import_files_done = stats.import_files_total = 0
+                    continue
+
+                processed_archives: list[str] = self.state.get("processed_archives", [])
+                processed_archives.append(archive.name)
+                self.state.set("processed_archives", processed_archives)
+                stats.archives_done += 1
                 stats.current_archive = None
                 stats.current_action = None
                 stats.extract_files_done = stats.extract_files_total = 0
                 stats.import_files_done = stats.import_files_total = 0
-                continue
+                self._report_progress(stats)
 
-            processed_archives: list[str] = self.state.get("processed_archives", [])
-            processed_archives.append(archive.name)
-            self.state.set("processed_archives", processed_archives)
-            stats.archives_done += 1
-            stats.current_archive = None
-            stats.current_action = None
-            stats.extract_files_done = stats.extract_files_total = 0
-            stats.import_files_done = stats.import_files_total = 0
-            self._report_progress(stats)
+                # Only clean up from Drive *after* a successful import,
+                # never right after download - an archive that downloaded
+                # fine but failed to extract/import must stay in Drive so
+                # it isn't lost.
+                drive_file_id = drive_ids_by_name.pop(archive.name, None)
+                if drive_file_id is not None:
+                    self.state.set("drive_file_id_by_name", drive_ids_by_name)
+                    if delete_drive_after:
+                        await self._cleanup_drive_file(drive_file_id, archive.name, stats)
 
-            # Only clean up from Drive *after* a successful import, never
-            # right after download - an archive that downloaded fine but
-            # failed to extract/import must stay in Drive so it isn't lost.
-            drive_file_id = drive_ids_by_name.pop(archive.name, None)
-            if drive_file_id is not None:
-                self.state.set("drive_file_id_by_name", drive_ids_by_name)
-                if delete_drive_after:
-                    await self._cleanup_drive_file(drive_file_id, archive.name, stats)
+                if delete_local_after:
+                    await self.hass.async_add_executor_job(archive.unlink, True)
 
-            if delete_local_after:
-                await self.hass.async_add_executor_job(archive.unlink, True)
-
+        await asyncio.gather(_produce(), _consume())
         return stats
 
     # -- cURL/PowerShell captured session (cookie-authenticated, no OAuth) ---
 
-    async def _download_via_curl_session(self, watch_dir: Path, stats: BackupStats) -> None:
+    async def _download_via_curl_session(
+        self, watch_dir: Path, stats: BackupStats, queue: "asyncio.Queue[Path | None]"
+    ) -> None:
         """Fetch every archive in a Takeout export using a session cookie
         captured from the browser (see curl_session.py). Credit:
         clivewatts/takeout_downloader_script - see the module docstring
-        above and curl_session.py."""
+        above and curl_session.py.
+
+        Each archive is put on `queue` the moment its own download
+        completes, so async_run_backup's consumer can start
+        extracting/importing it right away, concurrently with this method
+        moving on to download the next one - see async_run_backup."""
         raw = self._option(CONF_TAKEOUT_CURL_SESSION, "") or ""
         if not raw.strip():
             return
@@ -261,6 +293,7 @@ class TakeoutBackend(BackupBackend):
         consecutive_404 = 0
         seq = 1
         while seq <= max_files and consecutive_404 < 3:
+            await self._wait_if_paused()
             name = session_info.filename(seq)
             dest = watch_dir / name
             if await self.hass.async_add_executor_job(dest.exists):
@@ -322,7 +355,12 @@ class TakeoutBackend(BackupBackend):
                         self._report_progress(stats)
 
                     await throttled_stream_to_file(
-                        resp, dest, self.hass, limit_kbps, on_progress=_on_chunk
+                        resp,
+                        dest,
+                        self.hass,
+                        limit_kbps,
+                        on_progress=_on_chunk,
+                        pause_event=self.download_resume,
                     )
                     # A chunk just downloaded successfully with this
                     # cookie - any previously-raised "session expired"
@@ -337,6 +375,8 @@ class TakeoutBackend(BackupBackend):
                 stats.current_action = None
                 return
 
+            stats.archives_total += 1
+            await queue.put(dest)
             consecutive_404 = 0
             seq += 1
 
@@ -369,7 +409,12 @@ class TakeoutBackend(BackupBackend):
 
     # -- Google Drive folder sync (OAuth, drive.readonly + drive.metadata) ---
 
-    async def _sync_drive_folder(self, watch_dir: Path, stats: BackupStats) -> None:
+    async def _sync_drive_folder(
+        self, watch_dir: Path, stats: BackupStats, queue: "asyncio.Queue[Path | None]"
+    ) -> None:
+        """Puts each newly-downloaded archive on `queue` as soon as it
+        finishes, same as _download_via_curl_session - see there and
+        async_run_backup for why."""
         if self._oauth is None:
             return
         await self._oauth.async_ensure_token_valid()
@@ -414,6 +459,7 @@ class TakeoutBackend(BackupBackend):
             if not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
                 continue
 
+            await self._wait_if_paused()
             dest = watch_dir / name
             if await self.hass.async_add_executor_job(dest.exists):
                 if await self.hass.async_add_executor_job(
@@ -447,7 +493,9 @@ class TakeoutBackend(BackupBackend):
                     timeout=DOWNLOAD_TIMEOUT,
                 )
                 resp.raise_for_status()
-                await throttled_stream_to_file(resp, dest, self.hass, limit_kbps)
+                await throttled_stream_to_file(
+                    resp, dest, self.hass, limit_kbps, pause_event=self.download_resume
+                )
             except Exception as err:  # noqa: BLE001
                 stats.errors.append(f"Drive download of {name} failed: {err}")
                 await self.hass.async_add_executor_job(dest.unlink, True)
@@ -456,6 +504,8 @@ class TakeoutBackend(BackupBackend):
             downloaded_ids.append(file_id)
             self.state.set("downloaded_drive_file_ids", downloaded_ids)
             self._remember_drive_file(name, file_id)
+            stats.archives_total += 1
+            await queue.put(dest)
 
     @staticmethod
     def _local_file_matches_drive_size(dest: Path, drive_size: str | int | None) -> bool:

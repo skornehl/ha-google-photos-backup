@@ -7,6 +7,8 @@ through (`async_get_clientsession(self.hass)` then `.get()`).
 """
 from __future__ import annotations
 
+import asyncio
+
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -109,7 +111,7 @@ async def test_downloads_until_three_consecutive_404s(monkeypatch, tmp_path: Pat
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     assert len(calls) == 5  # 001, 002 succeed; 003-005 are the 3 consecutive 404s that stop it
     assert (tmp_path / "takeout-20260923T121036Z-1-001.zip").exists()
@@ -127,7 +129,7 @@ async def test_stops_and_reports_clearly_on_expired_session(monkeypatch, tmp_pat
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     assert len(stats.errors) == 1
     assert "session expired" in stats.errors[0]
@@ -145,7 +147,7 @@ async def test_html_response_treated_as_expired_session(monkeypatch, tmp_path: P
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     assert len(stats.errors) == 1
     assert "HTML page" in stats.errors[0]
@@ -168,7 +170,7 @@ async def test_already_downloaded_files_are_skipped_not_refetched(monkeypatch, t
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     # 001 was never requested (already on disk); 002-004 hit as 3 consecutive 404s.
     assert not any("-001.zip" in c for c in calls)
@@ -182,7 +184,7 @@ async def test_empty_config_is_a_silent_noop(monkeypatch, tmp_path: Path):
     backend = _make_backend(tmp_path, "")
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     assert stats.errors == []
 
@@ -191,7 +193,7 @@ async def test_unparseable_session_reports_clear_error(tmp_path: Path):
     backend = _make_backend(tmp_path, "this is not a curl command")
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     assert len(stats.errors) == 1
     assert "Could not parse takeout_curl_session" in stats.errors[0]
@@ -223,7 +225,7 @@ async def test_reports_progress_during_and_resets_after_download(monkeypatch, tm
         (s.current_archive, s.current_action, s.current_archive_bytes_done, s.current_archive_bytes_total)
     )
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     # At least one report happened while archive 001 was actively
     # downloading, with the byte total picked up from Content-Length.
@@ -247,7 +249,7 @@ async def test_expired_session_raises_a_repair_issue(monkeypatch, tmp_path: Path
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     takeout_module.ir.async_create_issue.assert_called_once()
     _, kwargs = takeout_module.ir.async_create_issue.call_args
@@ -268,7 +270,7 @@ async def test_html_response_also_raises_a_repair_issue(monkeypatch, tmp_path: P
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     takeout_module.ir.async_create_issue.assert_called_once()
 
@@ -282,7 +284,7 @@ async def test_successful_download_clears_any_expired_session_issue(monkeypatch,
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     stats = BackupStats()
 
-    await backend._download_via_curl_session(tmp_path, stats)
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     takeout_module.ir.async_create_issue.assert_not_called()
     takeout_module.ir.async_delete_issue.assert_called_with(

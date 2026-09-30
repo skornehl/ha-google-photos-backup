@@ -5,6 +5,8 @@ download, Drive archive download) where mocking is straightforward.
 """
 from __future__ import annotations
 
+import asyncio
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -101,7 +103,7 @@ async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_p
 
     # Real (non-existent) path so dest.exists() -> False and the code
     # actually reaches the download call we want to inspect.
-    await backend._sync_drive_folder(tmp_path, stats)
+    await backend._sync_drive_folder(tmp_path, stats, asyncio.Queue())
 
     assert stats.errors == [], f"unexpected errors: {stats.errors}"
 

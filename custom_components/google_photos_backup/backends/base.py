@@ -1,6 +1,7 @@
 """Shared interface every backup backend implements."""
 from __future__ import annotations
 
+import asyncio
 import builtins
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -120,6 +121,34 @@ class BackupBackend(ABC):
         #: them to the sensors; when it's None (tests, direct use) reporting
         #: is simply a no-op, so backends never have to check.
         self._on_progress = on_progress
+        #: Live download pause/resume control (issue: user wants to pause
+        #: an in-progress download without cancelling the whole run).
+        #: .set() = running, .clear() = paused. Starts set (not paused).
+        #: Lives on the backend instance, which the coordinator creates
+        #: once in async_setup and reuses for every scheduled run (see
+        #: coordinator.py) - so a pause toggled between runs, or mid-run,
+        #: is respected by whichever download loop checks it next, and
+        #: survives across scheduled runs until explicitly un-paused.
+        #: Only meaningful for backends that actually stream downloads
+        #: (currently takeout_backend, via throttled_stream_to_file) -
+        #: backends that don't check it (e.g. rclone, which shells out to
+        #: its own process) simply ignore it.
+        self.download_resume = asyncio.Event()
+        self.download_resume.set()
+
+    @property
+    def download_paused(self) -> bool:
+        return not self.download_resume.is_set()
+
+    def pause_downloads(self) -> None:
+        self.download_resume.clear()
+
+    def resume_downloads(self) -> None:
+        self.download_resume.set()
+
+    async def _wait_if_paused(self) -> None:
+        """Block here until resumed. A no-op when not paused."""
+        await self.download_resume.wait()
 
     def _report_progress(self, stats: BackupStats) -> None:
         """Publish intermediate stats. Cheap and safe to call often.
