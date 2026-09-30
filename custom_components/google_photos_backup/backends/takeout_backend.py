@@ -83,6 +83,7 @@ from ..const import (
     CONF_TARGET_DIR,
     DEFAULT_BANDWIDTH_LIMIT_KBPS,
     DEFAULT_TAKEOUT_CURL_MAX_FILES,
+    DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT,
     DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC,
     DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY,
     DOMAIN,
@@ -160,7 +161,9 @@ class TakeoutBackend(BackupBackend):
         stats = BackupStats()
         watch_dir = Path(self.entry.data[CONF_TAKEOUT_WATCH_DIR])
         target_dir = self.entry.data[CONF_TARGET_DIR]
-        delete_local_after = self.entry.data.get(CONF_TAKEOUT_DELETE_AFTER_IMPORT, False)
+        delete_local_after = self._option(
+            CONF_TAKEOUT_DELETE_AFTER_IMPORT, DEFAULT_TAKEOUT_DELETE_AFTER_IMPORT
+        )
         delete_drive_after = self._option(
             CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC, DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC
         )
