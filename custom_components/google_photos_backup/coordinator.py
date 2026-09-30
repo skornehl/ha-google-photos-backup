@@ -49,12 +49,15 @@ class BackupData:
     free_space_bytes: int | None
     in_progress: bool = False
     #: What the backend is doing right now - see BackupStats in
-    #: backends/base.py for the field-by-field meaning. All reset to
-    #: their idle defaults once a run finishes (see _async_update_data).
-    current_archive: str | None = None
-    current_action: str | None = None
-    current_archive_bytes_done: int = 0
-    current_archive_bytes_total: int | None = None
+    #: backends/base.py for the field-by-field meaning (in particular why
+    #: download and extract/import are two independent tracks, not one
+    #: shared current_archive/current_action pair). All reset to their
+    #: idle defaults once a run finishes (see _async_update_data).
+    download_archive: str | None = None
+    download_bytes_done: int = 0
+    download_bytes_total: int | None = None
+    extract_archive: str | None = None
+    extract_action: str | None = None
     archives_total: int = 0
     archives_done: int = 0
     extract_files_done: int = 0
@@ -68,9 +71,10 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
 
     files_backed_up_total and friends still only update once per
     completed run (see issue #21): a long initial import can sit "quiet"
-    on those for a while before the numbers jump. current_archive/
-    current_action/current_archive_bytes_*/extract_files_*/import_files_*
-    are the exception - the backend reports those via _handle_progress
+    on those for a while before the numbers jump. download_archive/
+    download_bytes_*/extract_archive/extract_action/extract_files_*/
+    import_files_* are the exception - the backend reports those via
+    _handle_progress
     *during* a run (per archive, per chunk within a download, and per
     ~50 members within an extraction or file-move pass), specifically to
     cover the gap the above leaves: a single 50 GB+ archive can otherwise
@@ -150,10 +154,11 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             last_run_errors=stats.errors,
             free_space_bytes=self.data.free_space_bytes if self.data else None,
             in_progress=in_progress,
-            current_archive=stats.current_archive,
-            current_action=stats.current_action,
-            current_archive_bytes_done=stats.current_archive_bytes_done,
-            current_archive_bytes_total=stats.current_archive_bytes_total,
+            download_archive=stats.download_archive,
+            download_bytes_done=stats.download_bytes_done,
+            download_bytes_total=stats.download_bytes_total,
+            extract_archive=stats.extract_archive,
+            extract_action=stats.extract_action,
             archives_total=stats.archives_total,
             archives_done=stats.archives_done,
             extract_files_done=stats.extract_files_done,

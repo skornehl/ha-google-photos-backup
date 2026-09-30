@@ -132,11 +132,17 @@
       "free_space": {
         "name": "Freier Speicherplatz"
       },
-      "current_activity": {
-        "name": "Aktuelle Aktivität"
+      "download_activity": {
+        "name": "Download-Aktivität"
       },
-      "progress_percent": {
-        "name": "Fortschritt (%)"
+      "download_progress_percent": {
+        "name": "Download-Fortschritt (%)"
+      },
+      "extract_activity": {
+        "name": "Entpack-Aktivität"
+      },
+      "extract_progress_percent": {
+        "name": "Entpack-Fortschritt (%)"
       }
     },
     "switch": {

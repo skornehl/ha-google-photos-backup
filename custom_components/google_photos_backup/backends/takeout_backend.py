@@ -203,11 +203,11 @@ class TakeoutBackend(BackupBackend):
                     return
 
                 _LOGGER.info("Importing Takeout archive: %s", archive)
-                stats.current_archive = archive.name
-                # current_action itself is set by _extract/_import_archive's
+                stats.extract_archive = archive.name
+                # extract_action itself is set by _extract/_import_archive's
                 # move loop just below (they run in the executor thread and
                 # know which of the two sub-phases they're actually in) -
-                # reporting current_archive alone here still lets the
+                # reporting extract_archive alone here still lets the
                 # activity sensor show "archive N of M" the instant this
                 # archive starts, without waiting for that first threadsafe
                 # report to land.
@@ -218,8 +218,8 @@ class TakeoutBackend(BackupBackend):
                     )
                 except Exception as err:  # noqa: BLE001
                     stats.errors.append(f"{archive.name}: {err}")
-                    stats.current_archive = None
-                    stats.current_action = None
+                    stats.extract_archive = None
+                    stats.extract_action = None
                     stats.extract_files_done = stats.extract_files_total = 0
                     stats.import_files_done = stats.import_files_total = 0
                     continue
@@ -228,8 +228,8 @@ class TakeoutBackend(BackupBackend):
                 processed_archives.append(archive.name)
                 self.state.set("processed_archives", processed_archives)
                 stats.archives_done += 1
-                stats.current_archive = None
-                stats.current_action = None
+                stats.extract_archive = None
+                stats.extract_action = None
                 stats.extract_files_done = stats.extract_files_total = 0
                 stats.import_files_done = stats.import_files_total = 0
                 self._report_progress(stats)
@@ -336,22 +336,21 @@ class TakeoutBackend(BackupBackend):
                     _LOGGER.info(
                         "Downloading Takeout archive via captured session: %s", name
                     )
-                    stats.current_archive = name
-                    stats.current_action = "downloading"
-                    stats.current_archive_bytes_done = 0
+                    stats.download_archive = name
+                    stats.download_bytes_done = 0
                     try:
-                        stats.current_archive_bytes_total = int(
+                        stats.download_bytes_total = int(
                             resp.headers["Content-Length"]
                         )
                     except (KeyError, ValueError):
                         # Chunked/compressed responses may not carry one -
                         # the activity sensor just shows bytes done with no
                         # percentage then, rather than failing the download.
-                        stats.current_archive_bytes_total = None
+                        stats.download_bytes_total = None
                     self._report_progress(stats)
 
                     def _on_chunk(done: int) -> None:
-                        stats.current_archive_bytes_done = done
+                        stats.download_bytes_done = done
                         self._report_progress(stats)
 
                     await throttled_stream_to_file(
@@ -371,8 +370,7 @@ class TakeoutBackend(BackupBackend):
                     )
             except Exception as err:  # noqa: BLE001 - surfaced via sensor
                 stats.errors.append(f"{name}: {err}")
-                stats.current_archive = None
-                stats.current_action = None
+                stats.download_archive = None
                 return
 
             stats.archives_total += 1
@@ -380,8 +378,7 @@ class TakeoutBackend(BackupBackend):
             consecutive_404 = 0
             seq += 1
 
-        stats.current_archive = None
-        stats.current_action = None
+        stats.download_archive = None
 
     def _raise_curl_session_expired_issue(self) -> None:
         ir.async_create_issue(
@@ -585,7 +582,7 @@ class TakeoutBackend(BackupBackend):
             media_files = [
                 p for p in tmp_path.rglob("*") if p.is_file() and _is_takeout_content(p)
             ]
-            stats.current_action = "moving"
+            stats.extract_action = "moving"
             stats.import_files_total = len(media_files)
             stats.import_files_done = 0
             self._report_progress_threadsafe(stats)
@@ -641,7 +638,7 @@ class TakeoutBackend(BackupBackend):
         20k+ thread hops onto the event loop for no visible UI benefit,
         since PROGRESS_MIN_INTERVAL_SECONDS already throttles what
         actually gets written to the sensors."""
-        stats.current_action = "extracting"
+        stats.extract_action = "extracting"
         name = archive.name.lower()
         if name.endswith(".zip"):
             # zipfile has sanitized member paths (strips '..'/absolute

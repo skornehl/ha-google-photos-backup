@@ -45,7 +45,7 @@ def test_extract_and_move_progress_report_member_and_file_counts(tmp_path: Path)
     backend = _make_backend()
     snapshots: list[tuple[str | None, int, int, int, int]] = []
     backend._on_progress = lambda s: snapshots.append(
-        (s.current_action, s.extract_files_done, s.extract_files_total, s.import_files_done, s.import_files_total)
+        (s.extract_action, s.extract_files_done, s.extract_files_total, s.import_files_done, s.import_files_total)
     )
     stats = BackupStats()
 
@@ -75,7 +75,7 @@ def test_extract_progress_reports_before_move_starts(tmp_path: Path):
 
     backend = _make_backend()
     actions_seen: list[str | None] = []
-    backend._on_progress = lambda s: actions_seen.append(s.current_action)
+    backend._on_progress = lambda s: actions_seen.append(s.extract_action)
     stats = BackupStats()
 
     backend._import_archive(archive, str(target), stats)

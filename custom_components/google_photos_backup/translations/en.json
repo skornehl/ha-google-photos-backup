@@ -132,11 +132,17 @@
       "free_space": {
         "name": "Free space"
       },
-      "current_activity": {
-        "name": "Current activity"
+      "download_activity": {
+        "name": "Download activity"
       },
-      "progress_percent": {
-        "name": "Progress percent"
+      "download_progress_percent": {
+        "name": "Download progress"
+      },
+      "extract_activity": {
+        "name": "Extract activity"
+      },
+      "extract_progress_percent": {
+        "name": "Extract progress"
       }
     },
     "switch": {
