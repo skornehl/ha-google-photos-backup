@@ -8,7 +8,6 @@ through (`async_get_clientsession(self.hass)` then `.get()`).
 from __future__ import annotations
 
 import asyncio
-
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
