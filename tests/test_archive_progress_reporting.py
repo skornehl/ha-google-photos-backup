@@ -59,7 +59,7 @@ async def test_archive_counts_move_through_the_import_loop(tmp_path: Path):
     backend = _make_backend(watch_dir, target_dir)
     snapshots: list[tuple[int, int, str | None, str | None]] = []
     backend._on_progress = lambda s: snapshots.append(
-        (s.archives_total, s.archives_done, s.current_action, s.current_archive)
+        (s.archives_total, s.archives_done, s.extract_action, s.extract_archive)
     )
 
     stats = await backend.async_run_backup()
@@ -75,15 +75,15 @@ async def test_archive_counts_move_through_the_import_loop(tmp_path: Path):
     assert (2, 1, "extracting", "takeout-20260923T000000Z-1-002.zip") in snapshots
     assert (2, 1, "moving", "takeout-20260923T000000Z-1-002.zip") in snapshots
     # Idle again once the whole run has finished.
-    assert stats.current_action is None
-    assert stats.current_archive is None
+    assert stats.extract_action is None
+    assert stats.extract_archive is None
     assert stats.extract_files_done == 0
     assert stats.extract_files_total == 0
     assert stats.import_files_done == 0
     assert stats.import_files_total == 0
 
 
-async def test_a_failed_archive_still_clears_current_action(tmp_path: Path):
+async def test_a_failed_archive_still_clears_extract_action(tmp_path: Path):
     watch_dir = tmp_path / "watch"
     watch_dir.mkdir()
     target_dir = tmp_path / "target"
@@ -95,6 +95,6 @@ async def test_a_failed_archive_still_clears_current_action(tmp_path: Path):
     stats = await backend.async_run_backup()
 
     assert len(stats.errors) == 1
-    assert stats.current_action is None
-    assert stats.current_archive is None
+    assert stats.extract_action is None
+    assert stats.extract_archive is None
     assert stats.archives_done == 0

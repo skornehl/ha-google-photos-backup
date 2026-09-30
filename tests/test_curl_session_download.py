@@ -200,10 +200,9 @@ async def test_unparseable_session_reports_clear_error(tmp_path: Path):
 
 async def test_reports_progress_during_and_resets_after_download(monkeypatch, tmp_path: Path):
     """A single archive download can run for hours (issue #21 follow-up) -
-    current_archive/current_action/current_archive_bytes_* must move while
-    it's happening and reset to idle once the whole watch_dir pass is
-    done, so the activity sensor doesn't get stuck showing "downloading"
-    forever."""
+    download_archive/download_bytes_* must move while it's happening and
+    reset to idle once the whole watch_dir pass is done, so the activity
+    sensor doesn't get stuck showing "downloading" forever."""
     responses = {
         1: _fake_response(200, body=b"0123456789", content_length=10),
         2: _fake_response(404),
@@ -219,9 +218,9 @@ async def test_reports_progress_during_and_resets_after_download(monkeypatch, tm
     backend = _make_backend(tmp_path, _CURL)
     backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
     stats = BackupStats()
-    snapshots: list[tuple[str | None, str | None, int, int | None]] = []
+    snapshots: list[tuple[str | None, int, int | None]] = []
     backend._on_progress = lambda s: snapshots.append(
-        (s.current_archive, s.current_action, s.current_archive_bytes_done, s.current_archive_bytes_total)
+        (s.download_archive, s.download_bytes_done, s.download_bytes_total)
     )
 
     await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
@@ -230,13 +229,11 @@ async def test_reports_progress_during_and_resets_after_download(monkeypatch, tm
     # downloading, with the byte total picked up from Content-Length.
     assert (
         "takeout-20260923T121036Z-1-001.zip",
-        "downloading",
         10,
         10,
     ) in snapshots
     # Idle again once the whole pass (all archives) has finished.
-    assert stats.current_archive is None
-    assert stats.current_action is None
+    assert stats.download_archive is None
 
 
 async def test_expired_session_raises_a_repair_issue(monkeypatch, tmp_path: Path):

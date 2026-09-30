@@ -30,16 +30,30 @@ class BackupStats:
     #: sensor - a single huge archive download or extraction can otherwise
     #: sit for hours between the coarser files_downloaded/files_skipped
     #: updates above, which only change once a whole archive is imported.
-    #: current_action is "downloading" | "extracting" | "moving" | None
-    #: (idle). "extracting" and "moving" are two sub-phases of what used
-    #: to be a single opaque "importing" - unpacking a 50GB+ archive with
-    #: tens of thousands of members and then moving each matched file
-    #: into the target library are each slow enough on their own to need
-    #: their own progress, not just "importing, no further detail".
-    current_archive: str | None = None
-    current_action: str | None = None
-    current_archive_bytes_done: int = 0
-    current_archive_bytes_total: int | None = None
+    #:
+    #: Download and extract/import run *concurrently* (a producer/
+    #: consumer pair in async_run_backup - archive N+1 can be downloading
+    #: while archive N is still being extracted/moved), so download
+    #: progress and extract/import progress are two independent tracks
+    #: with their own archive name, not one shared current_archive/
+    #: current_action pair - sharing them used to mean the two sides
+    #: raced to overwrite each other's fields, showing e.g. "downloading"
+    #: as the activity while the progress percentage actually belonged to
+    #: the extraction that was simultaneously running.
+    #:
+    #: download_archive is None when nothing is currently downloading.
+    download_archive: str | None = None
+    download_bytes_done: int = 0
+    download_bytes_total: int | None = None
+    #: extract_archive is None when nothing is currently being
+    #: extracted/moved. extract_action is "extracting" | "moving" | None -
+    #: two sub-phases of what used to be a single opaque "importing":
+    #: unpacking a 50GB+ archive with tens of thousands of members and
+    #: then moving each matched file into the target library are each
+    #: slow enough on their own to need their own progress, not just
+    #: "importing, no further detail".
+    extract_archive: str | None = None
+    extract_action: str | None = None
     #: Archives queued for import this run vs. already fully imported -
     #: only known once the watch_dir scan has run, so both start at 0.
     archives_total: int = 0

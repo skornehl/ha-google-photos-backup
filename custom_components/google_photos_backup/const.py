@@ -186,5 +186,12 @@ ATTR_LAST_SYNC: Final = "last_sync"
 ATTR_FILES_BACKED_UP: Final = "files_backed_up"
 ATTR_LAST_ERROR: Final = "last_error"
 ATTR_FREE_SPACE: Final = "free_space"
-ATTR_CURRENT_ACTIVITY: Final = "current_activity"
-ATTR_PROGRESS_PERCENT: Final = "progress_percent"
+#: Split into separate download/extract tracks (was one shared
+#: current_activity/progress_percent pair) - see BackupStats in
+#: backends/base.py for why: download and extract/import now run
+#: concurrently, so one shared "current archive/action" pair meant the
+#: two sides raced to overwrite each other's fields.
+ATTR_DOWNLOAD_ACTIVITY: Final = "download_activity"
+ATTR_DOWNLOAD_PROGRESS_PERCENT: Final = "download_progress_percent"
+ATTR_EXTRACT_ACTIVITY: Final = "extract_activity"
+ATTR_EXTRACT_PROGRESS_PERCENT: Final = "extract_progress_percent"

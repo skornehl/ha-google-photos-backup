@@ -12,12 +12,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    ATTR_CURRENT_ACTIVITY,
+    ATTR_DOWNLOAD_ACTIVITY,
+    ATTR_DOWNLOAD_PROGRESS_PERCENT,
+    ATTR_EXTRACT_ACTIVITY,
+    ATTR_EXTRACT_PROGRESS_PERCENT,
     ATTR_FILES_BACKED_UP,
     ATTR_FREE_SPACE,
     ATTR_LAST_ERROR,
     ATTR_LAST_SYNC,
-    ATTR_PROGRESS_PERCENT,
     CONF_BACKEND,
     DOMAIN,
 )
@@ -34,8 +36,10 @@ async def async_setup_entry(
             FilesBackedUpSensor(coordinator, entry),
             LastErrorSensor(coordinator, entry),
             FreeSpaceSensor(coordinator, entry),
-            CurrentActivitySensor(coordinator, entry),
-            ProgressPercentSensor(coordinator, entry),
+            DownloadActivitySensor(coordinator, entry),
+            DownloadProgressSensor(coordinator, entry),
+            ExtractActivitySensor(coordinator, entry),
+            ExtractProgressSensor(coordinator, entry),
         ]
     )
 
@@ -131,51 +135,38 @@ class FreeSpaceSensor(_BaseSensor):
         return round(self.coordinator.data.free_space_bytes / 1_000_000_000, 2)
 
 
-class CurrentActivitySensor(_BaseSensor):
-    """What the backend is doing right now.
+class DownloadActivitySensor(_BaseSensor):
+    """Whether an archive is downloading right now, and which one.
 
-    Exists specifically for the gap FilesBackedUpSensor/LastSyncSensor
-    can't cover: those only change once a whole archive has been
-    imported, but a single Takeout archive download, extraction, or
-    file-move pass can run for hours on its own with zero other visible
-    signal (see coordinator.py). "idle" covers both "nothing to do" and
-    "between runs" - distinguishing those isn't worth a fifth state, the
-    last_sync sensor already answers "when did something last happen".
-
-    "importing" used to be one opaque state covering both unpacking an
-    archive and moving its matched files into the target library -
-    split into "extracting"/"moving" since each is slow enough on its
-    own (tens of thousands of members/files) to want its own progress,
-    not just "importing, no further detail".
+    Separate from ExtractActivitySensor on purpose: download and extract/
+    import run *concurrently* (a producer/consumer pair in
+    async_run_backup - archive N+1 can be downloading while archive N is
+    still being extracted/moved), so "what's downloading" and "what's
+    being extracted" are two independent, simultaneously-true facts, not
+    two mutually-exclusive phases of one shared "current activity" - see
+    BackupStats in backends/base.py.
     """
 
-    _attr_icon = "mdi:sync"
+    _attr_icon = "mdi:download"
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, ATTR_CURRENT_ACTIVITY)
+        super().__init__(coordinator, entry, ATTR_DOWNLOAD_ACTIVITY)
 
     @property
     def native_value(self) -> str:
-        if not self.coordinator.data or not self.coordinator.data.current_action:
+        if not self.coordinator.data or not self.coordinator.data.download_archive:
             return "idle"
-        action = self.coordinator.data.current_action
-        return action
+        return "downloading"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         if not self.coordinator.data:
             return {}
-        return {
-            "current_archive": self.coordinator.data.current_archive,
-            "archives_done": self.coordinator.data.archives_done,
-            "archives_total": self.coordinator.data.archives_total,
-        }
+        return {"archive": self.coordinator.data.download_archive}
 
 
-class ProgressPercentSensor(_BaseSensor):
-    """Percentage through whatever current_activity currently says is
-    happening - downloading (by bytes), extracting, or moving (both by
-    file/member count, known upfront from the archive's own index).
+class DownloadProgressSensor(_BaseSensor):
+    """Percentage through the archive currently downloading, by bytes.
 
     Unavailable (None) while idle, or while downloading a response with
     no Content-Length header (not guaranteed - see takeout_backend.py) -
@@ -184,25 +175,89 @@ class ProgressPercentSensor(_BaseSensor):
 
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:progress-download"
+
+    def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, ATTR_DOWNLOAD_PROGRESS_PERCENT)
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data
+        if not data or not data.download_archive or not data.download_bytes_total:
+            return None
+        return round(100 * data.download_bytes_done / data.download_bytes_total, 1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if not self.coordinator.data:
+            return {}
+        data = self.coordinator.data
+        return {
+            "archive": data.download_archive,
+            "bytes_done": data.download_bytes_done,
+            "bytes_total": data.download_bytes_total,
+        }
+
+
+class ExtractActivitySensor(_BaseSensor):
+    """Whether an archive is being extracted/moved right now, and which
+    one. See DownloadActivitySensor for why this is a separate sensor
+    rather than sharing one "current activity" with the download side.
+
+    "idle" covers both "nothing to do" and "between runs" - distinguishing
+    those isn't worth a third state, the last_sync sensor already answers
+    "when did something last happen". "extracting"/"moving" are two
+    sub-phases of what used to be a single opaque "importing" - unpacking
+    an archive and then moving its matched files into the target library
+    are each slow enough on their own (tens of thousands of members/
+    files) to want their own progress.
+    """
+
+    _attr_icon = "mdi:archive-arrow-down"
+
+    def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, ATTR_EXTRACT_ACTIVITY)
+
+    @property
+    def native_value(self) -> str:
+        if not self.coordinator.data or not self.coordinator.data.extract_action:
+            return "idle"
+        return self.coordinator.data.extract_action
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if not self.coordinator.data:
+            return {}
+        return {
+            "archive": self.coordinator.data.extract_archive,
+            "archives_done": self.coordinator.data.archives_done,
+            "archives_total": self.coordinator.data.archives_total,
+        }
+
+
+class ExtractProgressSensor(_BaseSensor):
+    """Percentage through whatever extract_activity currently says is
+    happening - extracting or moving (both by file/member count, known
+    upfront from the archive's own index). Unavailable (None) while idle.
+    """
+
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:progress-check"
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, ATTR_PROGRESS_PERCENT)
+        super().__init__(coordinator, entry, ATTR_EXTRACT_PROGRESS_PERCENT)
 
     @property
     def native_value(self) -> float | None:
         data = self.coordinator.data
         if not data:
             return None
-        if data.current_action == "downloading":
-            if not data.current_archive_bytes_total:
-                return None
-            done, total = data.current_archive_bytes_done, data.current_archive_bytes_total
-        elif data.current_action == "extracting":
+        if data.extract_action == "extracting":
             if not data.extract_files_total:
                 return None
             done, total = data.extract_files_done, data.extract_files_total
-        elif data.current_action == "moving":
+        elif data.extract_action == "moving":
             if not data.import_files_total:
                 return None
             done, total = data.import_files_done, data.import_files_total
@@ -216,8 +271,7 @@ class ProgressPercentSensor(_BaseSensor):
             return {}
         data = self.coordinator.data
         return {
-            "download_bytes_done": data.current_archive_bytes_done,
-            "download_bytes_total": data.current_archive_bytes_total,
+            "archive": data.extract_archive,
             "extract_files_done": data.extract_files_done,
             "extract_files_total": data.extract_files_total,
             "move_files_done": data.import_files_done,
