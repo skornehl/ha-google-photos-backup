@@ -68,7 +68,7 @@ async def test_library_api_item_download_passes_explicit_timeout(monkeypatch, tm
 async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_path):
     import custom_components.google_photos_backup.backends.takeout_backend as takeout_module
 
-    async def _fake_throttled_stream_to_file(resp, dest, hass, limit_kbps, pacer=None):
+    async def _fake_throttled_stream_to_file(resp, dest, hass, limit_kbps, pacer=None, pause_event=None):
         return 0
 
     monkeypatch.setattr(
