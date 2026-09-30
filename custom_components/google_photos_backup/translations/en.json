@@ -138,6 +138,11 @@
       "progress_percent": {
         "name": "Progress percent"
       }
+    },
+    "switch": {
+      "pause_download": {
+        "name": "Pause download"
+      }
     }
   },
   "services": {

@@ -71,6 +71,7 @@ async def throttled_stream_to_file(
     flush_size: int = DRIVE_DOWNLOAD_FLUSH_SIZE,
     pacer: BandwidthPacer | None = None,
     on_progress: Callable[[int], None] | None = None,
+    pause_event: asyncio.Event | None = None,
 ) -> int:
     """Stream resp's body to dest_path, paced to `limit_kbps` (KiB/s,
     <=0 = unlimited). Buffers up to `flush_size` in memory before each
@@ -85,6 +86,12 @@ async def throttled_stream_to_file(
     way to show any movement at all during a single archive's download,
     which can otherwise run for hours with no other signal (issue #21
     covered *between* archives, not within one).
+
+    `pause_event`, if given, is awaited after every chunk read - `.clear()`
+    it to pause mid-download, `.set()` to resume. Checked here (not just
+    between archives in the caller's own loop) so pausing a single
+    multi-GB archive actually pauses it, rather than only taking effect
+    once that one archive finishes.
 
     Writes to a `<dest_path>.part` sibling and only `os.replace()`s it
     onto `dest_path` after the transfer completes fully - so a process
@@ -115,6 +122,8 @@ async def throttled_stream_to_file(
                 await pacer.account(len(chunk))
             if on_progress is not None:
                 on_progress(total)
+            if pause_event is not None:
+                await pause_event.wait()
             if len(buffer) >= flush_size:
                 await hass.async_add_executor_job(
                     _flush, bytes(buffer), "ab" if wrote_anything else "wb"

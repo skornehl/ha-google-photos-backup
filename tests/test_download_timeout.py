@@ -5,6 +5,7 @@ download, Drive archive download) where mocking is straightforward.
 """
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -67,7 +68,7 @@ async def test_library_api_item_download_passes_explicit_timeout(monkeypatch, tm
 async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_path):
     import custom_components.google_photos_backup.backends.takeout_backend as takeout_module
 
-    async def _fake_throttled_stream_to_file(resp, dest, hass, limit_kbps, pacer=None):
+    async def _fake_throttled_stream_to_file(resp, dest, hass, limit_kbps, pacer=None, pause_event=None):
         return 0
 
     monkeypatch.setattr(
@@ -101,7 +102,7 @@ async def test_drive_archive_download_passes_explicit_timeout(monkeypatch, tmp_p
 
     # Real (non-existent) path so dest.exists() -> False and the code
     # actually reaches the download call we want to inspect.
-    await backend._sync_drive_folder(tmp_path, stats)
+    await backend._sync_drive_folder(tmp_path, stats, asyncio.Queue())
 
     assert stats.errors == [], f"unexpected errors: {stats.errors}"
 
