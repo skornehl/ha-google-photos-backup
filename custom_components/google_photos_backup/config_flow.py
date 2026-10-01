@@ -67,7 +67,15 @@ _MULTILINE_TEXT = selector.selector({"text": {"multiline": True}})
 def _common_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Fields every backend collects: target dir, sync interval, and a
     bandwidth limit (a no-op for whichever backend/path doesn't happen to
-    transfer bytes at all, harmless to always offer)."""
+    transfer bytes at all, harmless to always offer).
+
+    download_concurrency is deliberately NOT here - only library_api.py
+    reads it (TakeoutBackend downloads one archive at a time, see its
+    producer/consumer docstring; rclone manages its own transfer
+    parallelism via its own flags). It used to be offered to every
+    backend here regardless, which let a takeout/rclone user set a value
+    that silently did nothing - see async_step_library_api_options for
+    where it now actually belongs."""
     defaults = defaults or {}
     return vol.Schema(
         {
@@ -80,10 +88,6 @@ def _common_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_BANDWIDTH_LIMIT_KBPS,
                 default=defaults.get(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS),
             ): vol.All(vol.Coerce(int), vol.Range(min=0)),
-            vol.Optional(
-                CONF_DOWNLOAD_CONCURRENCY,
-                default=defaults.get(CONF_DOWNLOAD_CONCURRENCY, DEFAULT_DOWNLOAD_CONCURRENCY),
-            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY)),
         }
     )
 
@@ -245,7 +249,14 @@ class GooglePhotosBackupFlowHandler(
         if user_input is not None:
             self._data.update(user_input)
             return await self._async_finalize_entry("Google Photos Backup (Picker/Library API)")
-        return self.async_show_form(step_id="library_api_options", data_schema=_common_schema())
+        schema = _common_schema().extend(
+            {
+                vol.Optional(
+                    CONF_DOWNLOAD_CONCURRENCY, default=DEFAULT_DOWNLOAD_CONCURRENCY
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY)),
+            }
+        )
+        return self.async_show_form(step_id="library_api_options", data_schema=schema)
 
     # -- rclone ---------------------------------------------------------------
 
@@ -367,11 +378,19 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
                 CONF_BANDWIDTH_LIMIT_KBPS,
                 default=_current(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS),
             ): vol.All(vol.Coerce(int), vol.Range(min=0)),
-            vol.Optional(
-                CONF_DOWNLOAD_CONCURRENCY,
-                default=_current(CONF_DOWNLOAD_CONCURRENCY, DEFAULT_DOWNLOAD_CONCURRENCY),
-            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY)),
         }
+        # Only library_api.py's downloader actually reads this - TakeoutBackend
+        # downloads one archive at a time, rclone manages its own transfer
+        # parallelism. Showing it for those backends let a value be set that
+        # silently did nothing (found 2026-10-01: a takeout entry had
+        # download_concurrency: 4 with no effect whatsoever).
+        if self.config_entry.data.get(CONF_BACKEND) == BACKEND_LIBRARY_API:
+            schema_dict[
+                vol.Optional(
+                    CONF_DOWNLOAD_CONCURRENCY,
+                    default=_current(CONF_DOWNLOAD_CONCURRENCY, DEFAULT_DOWNLOAD_CONCURRENCY),
+                )
+            ] = vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY))
         if self.config_entry.data.get(CONF_BACKEND) == BACKEND_TAKEOUT:
             schema_dict[
                 vol.Optional(

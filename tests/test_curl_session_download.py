@@ -74,14 +74,16 @@ def _fake_response(
     return _Ctx()
 
 
-def _make_backend(tmp_path: Path, curl_session: str) -> TakeoutBackend:
+def _make_backend(
+    tmp_path: Path, curl_session: str, *, state: dict | None = None
+) -> TakeoutBackend:
     entry = SimpleNamespace(
         entry_id="test_entry_id",
         title="Test entry",
         data={},
         options={CONF_TAKEOUT_CURL_SESSION: curl_session},
     )
-    return TakeoutBackend(MagicMock(), entry, SyncStateStore({}))
+    return TakeoutBackend(MagicMock(), entry, SyncStateStore(state if state is not None else {}))
 
 
 async def test_downloads_until_three_consecutive_404s(monkeypatch, tmp_path: Path):
@@ -172,6 +174,48 @@ async def test_already_downloaded_files_are_skipped_not_refetched(monkeypatch, t
     await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
 
     # 001 was never requested (already on disk); 002-004 hit as 3 consecutive 404s.
+    assert not any("-001.zip" in c for c in calls)
+    assert len(calls) == 3
+
+
+async def test_already_imported_archives_are_not_refetched_after_deletion(
+    monkeypatch, tmp_path: Path
+):
+    """takeout_delete_after_import removes the archive from watch_dir once
+    imported (see takeout_backend.py's _consume loop) - dest.exists() alone
+    can no longer tell a re-run that archive 001 is done, so the download
+    loop must also consult processed_archives. Regression for the bug found
+    2026-10-01: with delete-after-import now working, every already-
+    imported archive was being re-downloaded from Google on every run."""
+    responses = {
+        2: _fake_response(404),
+        3: _fake_response(404),
+        4: _fake_response(404),
+    }
+    calls: list[str] = []
+
+    fake_session = MagicMock()
+
+    def _get(url, headers=None, **kwargs):
+        calls.append(url)
+        seq = int(url.rsplit("-", 1)[-1][:3])
+        return responses[seq]
+
+    fake_session.get = _get
+    monkeypatch.setattr(takeout_module, "async_get_clientsession", lambda hass: fake_session)
+
+    backend = _make_backend(
+        tmp_path,
+        _CURL,
+        state={"processed_archives": ["takeout-20260923T121036Z-1-001.zip"]},
+    )
+    backend.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
+    stats = BackupStats()
+
+    await backend._download_via_curl_session(tmp_path, stats, asyncio.Queue())
+
+    # 001 is gone from disk (already imported+deleted) but still skipped,
+    # because it's in processed_archives; 002-004 hit as 3 consecutive 404s.
     assert not any("-001.zip" in c for c in calls)
     assert len(calls) == 3
 

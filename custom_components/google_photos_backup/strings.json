@@ -138,6 +138,9 @@
       "download_progress_percent": {
         "name": "Download progress"
       },
+      "download_speed": {
+        "name": "Download speed"
+      },
       "extract_activity": {
         "name": "Extract activity"
       },

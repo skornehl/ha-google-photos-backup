@@ -56,6 +56,7 @@ class BackupData:
     download_archive: str | None = None
     download_bytes_done: int = 0
     download_bytes_total: int | None = None
+    download_speed_bps: float = 0.0
     extract_archive: str | None = None
     extract_action: str | None = None
     archives_total: int = 0
@@ -101,6 +102,12 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self.backend: BackupBackend | None = None
         self._files_backed_up_total = 0
         self._last_progress_at = 0.0
+        # Speed tracking (bytes/sec), derived from the byte delta between
+        # progress ticks - see _update_download_speed.
+        self._speed_tracker_archive: str | None = None
+        self._speed_tracker_bytes = 0
+        self._speed_tracker_at = 0.0
+        self._download_speed_bps = 0.0
 
     @property
     def state_data(self) -> dict[str, Any]:
@@ -138,8 +145,34 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         now = self.hass.loop.time()
         if now - self._last_progress_at < PROGRESS_MIN_INTERVAL_SECONDS:
             return
+        self._update_download_speed(stats, now)
         self._last_progress_at = now
         self.async_set_updated_data(self._build_data(stats, in_progress=True))
+
+    def _update_download_speed(self, stats: BackupStats, now: float) -> None:
+        """Bytes/sec since the last progress tick for the archive currently
+        downloading. Reset to 0 whenever the active archive changes (a new
+        download starting from 0 bytes against the previous archive's
+        tracked byte count would otherwise read as a huge negative delta)
+        or bytes_done goes backwards (a retry of the same archive name)."""
+        changed = (
+            stats.download_archive != self._speed_tracker_archive
+            or stats.download_bytes_done < self._speed_tracker_bytes
+        )
+        if changed:
+            self._speed_tracker_archive = stats.download_archive
+            self._speed_tracker_bytes = stats.download_bytes_done
+            self._speed_tracker_at = now
+            self._download_speed_bps = 0.0
+            return
+        elapsed = now - self._speed_tracker_at
+        if stats.download_archive is None or elapsed <= 0:
+            self._download_speed_bps = 0.0
+        else:
+            delta = stats.download_bytes_done - self._speed_tracker_bytes
+            self._download_speed_bps = max(0.0, delta / elapsed)
+        self._speed_tracker_bytes = stats.download_bytes_done
+        self._speed_tracker_at = now
 
     def _build_data(self, stats: BackupStats, *, in_progress: bool) -> BackupData:
         """Snapshot for the sensors. free_space is only refreshed at the end
@@ -157,6 +190,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             download_archive=stats.download_archive,
             download_bytes_done=stats.download_bytes_done,
             download_bytes_total=stats.download_bytes_total,
+            download_speed_bps=self._download_speed_bps,
             extract_archive=stats.extract_archive,
             extract_action=stats.extract_action,
             archives_total=stats.archives_total,

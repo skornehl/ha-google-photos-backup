@@ -138,6 +138,9 @@
       "download_progress_percent": {
         "name": "Download-Fortschritt (%)"
       },
+      "download_speed": {
+        "name": "Download-Geschwindigkeit"
+      },
       "extract_activity": {
         "name": "Entpack-Aktivität"
       },

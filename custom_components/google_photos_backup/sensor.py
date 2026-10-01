@@ -14,6 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_DOWNLOAD_ACTIVITY,
     ATTR_DOWNLOAD_PROGRESS_PERCENT,
+    ATTR_DOWNLOAD_SPEED,
     ATTR_EXTRACT_ACTIVITY,
     ATTR_EXTRACT_PROGRESS_PERCENT,
     ATTR_FILES_BACKED_UP,
@@ -38,6 +39,7 @@ async def async_setup_entry(
             FreeSpaceSensor(coordinator, entry),
             DownloadActivitySensor(coordinator, entry),
             DownloadProgressSensor(coordinator, entry),
+            DownloadSpeedSensor(coordinator, entry),
             ExtractActivitySensor(coordinator, entry),
             ExtractProgressSensor(coordinator, entry),
         ]
@@ -197,6 +199,31 @@ class DownloadProgressSensor(_BaseSensor):
             "bytes_done": data.download_bytes_done,
             "bytes_total": data.download_bytes_total,
         }
+
+
+class DownloadSpeedSensor(_BaseSensor):
+    """Current download throughput, derived from the byte delta between
+    progress ticks (see coordinator._update_download_speed) - not an
+    average over the whole archive, so it tracks a throttled rate
+    (bandwidth_limit_kbps) or a stalled connection within one
+    PROGRESS_MIN_INTERVAL_SECONDS window. 0, not unavailable, while idle -
+    unlike DownloadProgressSensor's percentage, "0 KB/s" is a meaningful
+    reading on its own rather than a misleading one.
+    """
+
+    _attr_device_class = SensorDeviceClass.DATA_RATE
+    _attr_native_unit_of_measurement = "KB/s"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:speedometer"
+
+    def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, ATTR_DOWNLOAD_SPEED)
+
+    @property
+    def native_value(self) -> float:
+        if not self.coordinator.data:
+            return 0.0
+        return round(self.coordinator.data.download_speed_bps / 1024, 1)
 
 
 class ExtractActivitySensor(_BaseSensor):
