@@ -193,5 +193,6 @@ ATTR_FREE_SPACE: Final = "free_space"
 #: two sides raced to overwrite each other's fields.
 ATTR_DOWNLOAD_ACTIVITY: Final = "download_activity"
 ATTR_DOWNLOAD_PROGRESS_PERCENT: Final = "download_progress_percent"
+ATTR_DOWNLOAD_SPEED: Final = "download_speed"
 ATTR_EXTRACT_ACTIVITY: Final = "extract_activity"
 ATTR_EXTRACT_PROGRESS_PERCENT: Final = "extract_progress_percent"

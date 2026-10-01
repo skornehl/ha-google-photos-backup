@@ -11,6 +11,7 @@ from __future__ import annotations
 from custom_components.google_photos_backup.const import (
     ATTR_DOWNLOAD_ACTIVITY,
     ATTR_DOWNLOAD_PROGRESS_PERCENT,
+    ATTR_DOWNLOAD_SPEED,
     ATTR_EXTRACT_ACTIVITY,
     ATTR_EXTRACT_PROGRESS_PERCENT,
     ATTR_FILES_BACKED_UP,
@@ -27,5 +28,6 @@ def test_sensor_key_constants_match_strings_json_entity_keys():
     assert ATTR_FREE_SPACE == "free_space"
     assert ATTR_DOWNLOAD_ACTIVITY == "download_activity"
     assert ATTR_DOWNLOAD_PROGRESS_PERCENT == "download_progress_percent"
+    assert ATTR_DOWNLOAD_SPEED == "download_speed"
     assert ATTR_EXTRACT_ACTIVITY == "extract_activity"
     assert ATTR_EXTRACT_PROGRESS_PERCENT == "extract_progress_percent"
