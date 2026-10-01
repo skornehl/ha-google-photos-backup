@@ -292,6 +292,10 @@ class TakeoutBackend(BackupBackend):
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             ),
         }
+        # Archives already fully imported (and, since takeout_delete_after_import,
+        # already deleted from watch_dir) are no longer caught by dest.exists()
+        # below - without this they'd be re-downloaded from Google on every run.
+        processed = set(self.state.get("processed_archives", []))
 
         consecutive_404 = 0
         seq = 1
@@ -299,7 +303,7 @@ class TakeoutBackend(BackupBackend):
             await self._wait_if_paused()
             name = session_info.filename(seq)
             dest = watch_dir / name
-            if await self.hass.async_add_executor_job(dest.exists):
+            if name in processed or await self.hass.async_add_executor_job(dest.exists):
                 # Already downloaded (this run or a previous one) -
                 # throttled_stream_to_file only ever leaves a complete
                 # file at this path, never a partial one, see throttle.py.
