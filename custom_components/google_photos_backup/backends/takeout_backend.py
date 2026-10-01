@@ -219,6 +219,25 @@ class TakeoutBackend(BackupBackend):
                     await self.hass.async_add_executor_job(
                         self._import_archive, archive, target_dir, stats
                     )
+                except (zipfile.BadZipFile, tarfile.ReadError) as err:
+                    # A truncated/corrupted download, not a transient
+                    # problem retrying the same bytes would fix - without
+                    # deleting it, every future run finds this exact file
+                    # again via _list_new_archives and fails identically
+                    # forever. Delete it so it's both missing from disk
+                    # and still absent from processed_archives, which
+                    # makes the next run's download loop treat it as
+                    # never-downloaded and fetch a fresh copy.
+                    stats.errors.append(
+                        f"{archive.name}: corrupt archive ({err}) - deleted, "
+                        "will be re-downloaded next run"
+                    )
+                    stats.extract_archive = None
+                    stats.extract_action = None
+                    stats.extract_files_done = stats.extract_files_total = 0
+                    stats.import_files_done = stats.import_files_total = 0
+                    await self.hass.async_add_executor_job(archive.unlink, True)
+                    continue
                 except Exception as err:  # noqa: BLE001
                     stats.errors.append(f"{archive.name}: {err}")
                     stats.extract_archive = None
