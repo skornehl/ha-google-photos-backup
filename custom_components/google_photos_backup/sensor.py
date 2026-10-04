@@ -207,12 +207,18 @@ class DownloadSpeedSensor(_BaseSensor):
     average over the whole archive, so it tracks a throttled rate
     (bandwidth_limit_kbps) or a stalled connection within one
     PROGRESS_MIN_INTERVAL_SECONDS window. 0, not unavailable, while idle -
-    unlike DownloadProgressSensor's percentage, "0 KB/s" is a meaningful
+    unlike DownloadProgressSensor's percentage, "0 kB/s" is a meaningful
     reading on its own rather than a misleading one.
+
+    Unit is "kB/s" (lowercase k), not "KB/s" - SensorDeviceClass.DATA_RATE
+    validates against HA's fixed unit list, which only has the former;
+    the uppercase form silently warns ("not a valid unit for the device
+    class") and HA reportedly won't convert/graph it correctly, even
+    though the entity still shows a value.
     """
 
     _attr_device_class = SensorDeviceClass.DATA_RATE
-    _attr_native_unit_of_measurement = "KB/s"
+    _attr_native_unit_of_measurement = "kB/s"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:speedometer"
 
