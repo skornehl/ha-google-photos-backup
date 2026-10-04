@@ -194,10 +194,15 @@ class TakeoutBackend(BackupBackend):
             # already on it, rather than blocking forever.
             await queue.put(None)
 
-        # name -> Drive file ID, persisted across runs so an archive that
-        # downloaded fine but failed to *import* last run still gets
-        # cleaned up from Drive once it does import successfully.
-        drive_ids_by_name: dict[str, str] = self.state.get("drive_file_id_by_name", {})
+        # Archives imported in an earlier run whose Drive copy was never
+        # cleaned up: the first run used to look names up in a dict that
+        # was never the one stored in state (see _forget_drive_file), so
+        # every archive of a user's first - and biggest - export stayed
+        # in Drive for good. Settle those before importing anything new.
+        processed_before = set(self.state.get("processed_archives", []))
+        for name in list(self.state.get("drive_file_id_by_name", {})):
+            if name in processed_before:
+                await self._forget_drive_file(name, stats, delete_drive_after)
 
         async def _consume() -> None:
             while True:
@@ -221,22 +226,23 @@ class TakeoutBackend(BackupBackend):
                     )
                 except (zipfile.BadZipFile, tarfile.ReadError) as err:
                     # A truncated/corrupted download, not a transient
-                    # problem retrying the same bytes would fix - without
-                    # deleting it, every future run finds this exact file
-                    # again via _list_new_archives and fails identically
-                    # forever. Delete it so it's both missing from disk
-                    # and still absent from processed_archives, which
-                    # makes the next run's download loop treat it as
-                    # never-downloaded and fetch a fresh copy.
+                    # problem retrying the same bytes would fix - left in
+                    # place, every future run finds this exact file again
+                    # via _list_new_archives and fails identically forever.
+                    # Get it out of the way (still absent from
+                    # processed_archives), so the next run's download
+                    # loops treat it as never-downloaded and fetch a fresh
+                    # copy - see _discard_corrupt_archive.
+                    where = await self._discard_corrupt_archive(archive, delete_local_after)
                     stats.errors.append(
-                        f"{archive.name}: corrupt archive ({err}) - deleted, "
-                        "will be re-downloaded next run"
+                        f"{archive.name}: corrupt archive ({err}) - {where}. If it "
+                        "came from Drive sync or the captured session, it is "
+                        "downloaded again on the next run."
                     )
                     stats.extract_archive = None
                     stats.extract_action = None
                     stats.extract_files_done = stats.extract_files_total = 0
                     stats.import_files_done = stats.import_files_total = 0
-                    await self.hass.async_add_executor_job(archive.unlink, True)
                     continue
                 except Exception as err:  # noqa: BLE001
                     stats.errors.append(f"{archive.name}: {err}")
@@ -260,11 +266,7 @@ class TakeoutBackend(BackupBackend):
                 # never right after download - an archive that downloaded
                 # fine but failed to extract/import must stay in Drive so
                 # it isn't lost.
-                drive_file_id = drive_ids_by_name.pop(archive.name, None)
-                if drive_file_id is not None:
-                    self.state.set("drive_file_id_by_name", drive_ids_by_name)
-                    if delete_drive_after:
-                        await self._cleanup_drive_file(drive_file_id, archive.name, stats)
+                await self._forget_drive_file(archive.name, stats, delete_drive_after)
 
                 if delete_local_after:
                     await self.hass.async_add_executor_job(archive.unlink, True)
@@ -570,6 +572,51 @@ class TakeoutBackend(BackupBackend):
         name_map[name] = file_id
         self.state.set("drive_file_id_by_name", name_map)
 
+    async def _forget_drive_file(self, name: str, stats: BackupStats, cleanup: bool) -> None:
+        """Drop a successfully imported archive from drive_file_id_by_name
+        and, if `cleanup`, trash/delete its Drive copy.
+
+        Reads the map from state on every call rather than holding on to
+        one dict for the whole run: when the key doesn't exist yet,
+        state.get() returns a fresh default each time, so a dict captured
+        at the start of the first run never saw what _remember_drive_file
+        stored during it."""
+        name_map: dict[str, str] = self.state.get("drive_file_id_by_name", {})
+        file_id = name_map.pop(name, None)
+        if file_id is None:
+            return
+        self.state.set("drive_file_id_by_name", name_map)
+        if cleanup:
+            await self._cleanup_drive_file(file_id, name, stats)
+
+    async def _discard_corrupt_archive(self, archive: Path, delete: bool) -> str:
+        """Move a corrupt archive out of the way so it gets downloaded again,
+        and return a short description of what happened to it.
+
+        Deleted only when the user opted into takeout_delete_after_import -
+        a manually placed archive can't be re-fetched by us, so by default
+        it's renamed to `<name>.corrupt` (no longer matched by
+        _list_new_archives) for the user to inspect or remove.
+
+        A Drive-synced archive is also dropped from downloaded_drive_file_ids:
+        _sync_drive_folder skips every ID in there, so without this the
+        archive would never be downloaded again despite the error saying
+        so."""
+        if delete:
+            await self.hass.async_add_executor_job(archive.unlink, True)
+            where = "deleted"
+        else:
+            quarantine = archive.with_name(archive.name + ".corrupt")
+            await self.hass.async_add_executor_job(os.replace, archive, quarantine)
+            where = f"moved to {quarantine.name}"
+
+        file_id = self.state.get("drive_file_id_by_name", {}).get(archive.name)
+        downloaded_ids: list[str] = self.state.get("downloaded_drive_file_ids", [])
+        if file_id is not None and file_id in downloaded_ids:
+            downloaded_ids.remove(file_id)
+            self.state.set("downloaded_drive_file_ids", downloaded_ids)
+        return where
+
     async def _cleanup_drive_file(self, file_id: str, name: str, stats: BackupStats) -> None:
         """Trash (default) or permanently delete an archive from Drive
         after it has been successfully imported. Only called when
@@ -588,7 +635,19 @@ class TakeoutBackend(BackupBackend):
         try:
             if permanently:
                 resp = await self._oauth.async_request("DELETE", f"{DRIVE_API_BASE}/files/{file_id}")
-            else:
+                if resp.status == 403:
+                    # files.delete only accepts the full `drive` scope (or
+                    # drive.file/drive.appdata, which don't cover files
+                    # Takeout created) - this integration deliberately
+                    # requests drive.metadata instead, which is enough to
+                    # trash but not to delete. Trash is the next best thing.
+                    stats.errors.append(
+                        f"{name}: Google refused permanent deletion (it needs the "
+                        "full 'drive' scope, which this integration does not "
+                        "request) - moved to Drive's trash instead."
+                    )
+                    permanently = False
+            if not permanently:
                 resp = await self._oauth.async_request(
                     "PATCH", f"{DRIVE_API_BASE}/files/{file_id}", json={"trashed": True}
                 )

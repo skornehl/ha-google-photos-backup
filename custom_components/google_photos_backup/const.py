@@ -143,7 +143,11 @@ OAUTH2_SCOPE_DRIVE_READONLY: Final = "https://www.googleapis.com/auth/drive.read
 # (trashing/deleting a file is a metadata-level change, no content access
 # needed for it) - narrower than the full .../auth/drive scope, which would
 # also grant editing/replacing file *content* anywhere in the user's Drive.
-# Only requested/used when "delete after sync" is enabled below.
+# Always requested together with drive.readonly (whether or not "delete
+# after sync" is on), so enabling the cleanup later needs no reauth. It is
+# enough to *trash* a file (files.update) but not to delete it outright:
+# files.delete only accepts the full drive scope - see
+# takeout_backend._cleanup_drive_file for the fallback.
 OAUTH2_SCOPE_DRIVE_METADATA: Final = "https://www.googleapis.com/auth/drive.metadata"
 OAUTH2_SCOPES_DRIVE: Final = [OAUTH2_SCOPE_DRIVE_READONLY, OAUTH2_SCOPE_DRIVE_METADATA]
 DRIVE_API_BASE: Final = "https://www.googleapis.com/drive/v3"
@@ -156,7 +160,9 @@ CONF_TAKEOUT_DRIVE_DELETE_AFTER_SYNC: Final = "takeout_drive_delete_after_sync"
 DEFAULT_TAKEOUT_DRIVE_DELETE_AFTER_SYNC: Final = False
 # False (default) = move to trash (recoverable for ~30 days, but keeps
 # counting against Drive quota until emptied). True = permanently delete
-# immediately (frees quota right away, NOT recoverable) - see README.
+# immediately (frees quota right away, NOT recoverable) - see README. Only
+# takes effect if the grant includes the full drive scope; with the scopes
+# this integration requests, Google refuses and the file is trashed instead.
 CONF_TAKEOUT_DRIVE_DELETE_PERMANENTLY: Final = "takeout_drive_delete_permanently"
 DEFAULT_TAKEOUT_DRIVE_DELETE_PERMANENTLY: Final = False
 
