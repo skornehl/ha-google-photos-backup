@@ -23,6 +23,7 @@ from .const import (
     DOMAIN,
     MAX_REPORTED_ERRORS,
     PROGRESS_MIN_INTERVAL_SECONDS,
+    STATE_SAVE_DELAY_SECONDS,
     STORAGE_KEY_TEMPLATE,
     STORAGE_VERSION,
 )
@@ -53,10 +54,6 @@ def sanitize_errors(errors: list[str]) -> list[str]:
     if len(errors) > MAX_REPORTED_ERRORS:
         cleaned.append(f"... and {len(errors) - MAX_REPORTED_ERRORS} more errors")
     return cleaned
-
-
-# How long a mid-run state save waits for further changes before writing.
-STATE_SAVE_DELAY_SECONDS = 10
 
 
 @dataclass

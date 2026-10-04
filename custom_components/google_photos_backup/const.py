@@ -174,6 +174,9 @@ CONFIG_ENTRY_VERSION: Final = 1
 # --- persisted sync state (Store) ------------------------------------------
 STORAGE_VERSION: Final = 1
 STORAGE_KEY_TEMPLATE: Final = f"{DOMAIN}_{{entry_id}}"
+# How long a mid-run state save (SyncStateStore.request_save) waits for
+# further changes before writing - coalesces a burst of finished items.
+STATE_SAVE_DELAY_SECONDS: Final = 10
 
 # --- misc --------------------------------------------------------------------
 PLATFORMS: Final = ["sensor", "switch"]
