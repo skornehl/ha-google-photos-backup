@@ -333,6 +333,11 @@ is enabled:
   you need this option on too. **This is not recoverable** - only enable
   it once you've confirmed a few sync runs actually produced correct,
   complete local backups.
+  *Scope caveat (checked against the Drive API reference 2026-10-04):*
+  `files.delete` only accepts the full `drive` scope, and this integration
+  deliberately requests the narrower `drive.metadata` (enough to trash, not
+  to delete). With that grant Google refuses the permanent delete; the
+  archive is then moved to the trash instead and the error sensor says so.
 
 #### Large libraries: first full export without Drive storage
 
