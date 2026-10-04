@@ -38,6 +38,9 @@ _LOGGER = logging.getLogger(__name__)
 # a normal, retried UpdateFailed.
 AUTH_FAILURE_STATUS_CODES = {400, 401, 403}
 
+# How long a mid-run state save waits for further changes before writing.
+STATE_SAVE_DELAY_SECONDS = 10
+
 
 @dataclass
 class BackupData:
@@ -122,7 +125,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
     async def async_setup(self) -> None:
         self._state_data = await self._store.async_load() or {}
         self._files_backed_up_total = self._state_data.get("files_backed_up_total", 0)
-        state = SyncStateStore(self._state_data)
+        state = SyncStateStore(self._state_data, request_save=self._request_state_save)
         self.backend = await async_create_backend(
             self.hass, self.entry, state, on_progress=self._handle_progress
         )
@@ -134,6 +137,12 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
                     f"Google authorisation invalid or revoked ({err.status})"
                 ) from err
             raise
+
+    def _request_state_save(self) -> None:
+        """Debounced mid-run save, see SyncStateStore.request_save. The delay
+        coalesces a burst of finished items into one write; HA's Store also
+        flushes pending delayed saves on shutdown."""
+        self._store.async_delay_save(lambda: self._state_data, STATE_SAVE_DELAY_SECONDS)
 
     def _handle_progress(self, stats: BackupStats) -> None:
         """Push intermediate stats from a running backup to the sensors.
