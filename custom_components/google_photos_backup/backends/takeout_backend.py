@@ -865,14 +865,6 @@ class TakeoutBackend(BackupBackend):
         return best
 
 
-def _reset_extract_progress(stats: BackupStats) -> None:
-    """Back to "idle" on the extract track once an archive is done (or failed)."""
-    stats.extract_archive = None
-    stats.extract_action = None
-    stats.extract_files_done = stats.extract_files_total = 0
-    stats.import_files_done = stats.import_files_total = 0
-
-
 def _is_takeout_content(path: Path) -> bool:
     """True for anything in an extracted archive that should be backed up -
     i.e. everything except Takeout's own metadata files, see
@@ -887,6 +879,14 @@ def _common_prefix_len(a: str, b: str) -> int:
             break
         n += 1
     return n
+
+
+def _reset_extract_progress(stats: BackupStats) -> None:
+    """Back to "idle" on the extract track once an archive is done (or failed)."""
+    stats.extract_archive = None
+    stats.extract_action = None
+    stats.extract_files_done = stats.extract_files_total = 0
+    stats.import_files_done = stats.import_files_total = 0
 
 
 def _safe_tar_extractall(tf: tarfile.TarFile, dest: Path) -> None:

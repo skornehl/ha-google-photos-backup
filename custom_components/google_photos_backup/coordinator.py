@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_SYNC_INTERVAL_MINUTES,
     DOMAIN,
     PROGRESS_MIN_INTERVAL_SECONDS,
+    STATE_SAVE_DELAY_SECONDS,
     STORAGE_KEY_TEMPLATE,
     STORAGE_VERSION,
 )
@@ -37,9 +38,6 @@ _LOGGER = logging.getLogger(__name__)
 # ConfigEntryAuthFailed; anything else (5xx, timeouts, ...) should just be
 # a normal, retried UpdateFailed.
 AUTH_FAILURE_STATUS_CODES = {400, 401, 403}
-
-# How long a mid-run state save waits for further changes before writing.
-STATE_SAVE_DELAY_SECONDS = 10
 
 
 @dataclass
