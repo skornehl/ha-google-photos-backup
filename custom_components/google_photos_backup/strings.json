@@ -81,7 +81,8 @@
     "error": {
       "cannot_connect": "Failed to connect",
       "invalid_auth": "Invalid authentication",
-      "unknown": "Unexpected error"
+      "unknown": "Unexpected error",
+      "invalid_curl_session": "Could not use this command: it needs a cookie and an https:// download URL on a Google host (takeout.google.com / *.usercontent.google.com). Copy the Download request again from DevTools' Network tab (Copy as cURL / Copy as PowerShell) and paste it unchanged."
     },
     "abort": {
       "already_configured": "This instance is already configured",
@@ -107,6 +108,9 @@
           "download_concurrency": "Parallel downloads (1-8)"
         }
       }
+    },
+    "error": {
+      "invalid_curl_session": "Could not use this command: it needs a cookie and an https:// download URL on a Google host (takeout.google.com / *.usercontent.google.com). Copy the Download request again from DevTools' Network tab (Copy as cURL / Copy as PowerShell) and paste it unchanged."
     }
   },
   "selector": {
@@ -188,6 +192,9 @@
               "takeout_curl_session": "cURL / PowerShell command"
             }
           }
+        },
+        "error": {
+          "invalid_curl_session": "Could not use this command: it needs a cookie and an https:// download URL on a Google host (takeout.google.com / *.usercontent.google.com). Copy the Download request again from DevTools' Network tab (Copy as cURL / Copy as PowerShell) and paste it unchanged."
         }
       }
     }

@@ -2,7 +2,8 @@
 
 Deliberately conservative about what leaves the user's machine. `token`
 (and `auth_implementation`) is an outright credential: the OAuth
-access/refresh token.
+access/refresh token. So is `takeout_curl_session`: the pasted command
+contains the Google account's browser session cookies.
 
 And the persisted sync state is dumped as *counts*, never as the raw
 lists: `processed_hashes` alone holds one SHA-256 per backed-up file, so
@@ -18,6 +19,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    CONF_TAKEOUT_CURL_SESSION,
     CONF_TAKEOUT_DRIVE_FOLDER_ID,
     DOMAIN,
 )
@@ -26,6 +28,9 @@ from .coordinator import GooglePhotosBackupCoordinator
 TO_REDACT = {
     "token",
     "auth_implementation",
+    # The pasted cURL/PowerShell command - it carries the user's Google
+    # account session cookies, which are as good as a signed-in browser.
+    CONF_TAKEOUT_CURL_SESSION,
     # Not a credential, but it identifies a specific Drive location.
     # Presence/absence is what matters for support, not the value.
     CONF_TAKEOUT_DRIVE_FOLDER_ID,

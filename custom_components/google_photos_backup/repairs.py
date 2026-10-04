@@ -18,6 +18,7 @@ from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
+from .backends.curl_session import parse_curl_session
 from .config_flow import _MULTILINE_TEXT
 from .const import CONF_TAKEOUT_CURL_SESSION
 
@@ -33,7 +34,10 @@ class CurlSessionExpiredRepairFlow(RepairsFlow):
         return await self.async_step_confirm()
 
     async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        if user_input is not None:
+        errors: dict[str, str] = {}
+        if user_input is not None and parse_curl_session(user_input[CONF_TAKEOUT_CURL_SESSION]) is None:
+            errors[CONF_TAKEOUT_CURL_SESSION] = "invalid_curl_session"
+        elif user_input is not None:
             new_options = dict(self._entry.options)
             new_options[CONF_TAKEOUT_CURL_SESSION] = user_input[CONF_TAKEOUT_CURL_SESSION]
             self.hass.config_entries.async_update_entry(self._entry, options=new_options)
@@ -45,6 +49,7 @@ class CurlSessionExpiredRepairFlow(RepairsFlow):
         return self.async_show_form(
             step_id="confirm",
             data_schema=vol.Schema({vol.Required(CONF_TAKEOUT_CURL_SESSION): _MULTILINE_TEXT}),
+            errors=errors,
         )
 
 

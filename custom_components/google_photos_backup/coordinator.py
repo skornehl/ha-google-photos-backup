@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,6 +21,7 @@ from .const import (
     CONF_TARGET_DIR,
     DEFAULT_SYNC_INTERVAL_MINUTES,
     DOMAIN,
+    MAX_REPORTED_ERRORS,
     PROGRESS_MIN_INTERVAL_SECONDS,
     STORAGE_KEY_TEMPLATE,
     STORAGE_VERSION,
@@ -37,6 +39,20 @@ _LOGGER = logging.getLogger(__name__)
 # ConfigEntryAuthFailed; anything else (5xx, timeouts, ...) should just be
 # a normal, retried UpdateFailed.
 AUTH_FAILURE_STATUS_CODES = {400, 401, 403}
+
+# Error strings often embed a request URL (aiohttp's ClientResponseError
+# includes it verbatim), and the query string of a Takeout download URL
+# carries per-user tokens. Errors end up in sensor attributes, the
+# recorder database and diagnostics exports - keep the URL, drop the query.
+_URL_QUERY = re.compile(r"(https?://[^\s'\"?#]+)\?[^\s'\"]*")
+
+
+def sanitize_errors(errors: list[str]) -> list[str]:
+    """Strip URL query strings and cap the list at MAX_REPORTED_ERRORS."""
+    cleaned = [_URL_QUERY.sub(r"\1?<redacted>", err) for err in errors[:MAX_REPORTED_ERRORS]]
+    if len(errors) > MAX_REPORTED_ERRORS:
+        cleaned.append(f"... and {len(errors) - MAX_REPORTED_ERRORS} more errors")
+    return cleaned
 
 
 @dataclass
@@ -184,7 +200,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             files_backed_up_total=self._files_backed_up_total + stats.files_downloaded,
             last_run_files_downloaded=stats.files_downloaded,
             last_run_files_skipped=stats.files_skipped,
-            last_run_errors=stats.errors,
+            last_run_errors=sanitize_errors(stats.errors),
             free_space_bytes=self.data.free_space_bytes if self.data else None,
             in_progress=in_progress,
             download_archive=stats.download_archive,
@@ -220,7 +236,8 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._files_backed_up_total += stats.files_downloaded
         self._state_data["files_backed_up_total"] = self._files_backed_up_total
         self._state_data["last_sync"] = datetime.now(timezone.utc).isoformat()
-        self._state_data["last_errors"] = stats.errors
+        errors = sanitize_errors(stats.errors)
+        self._state_data["last_errors"] = errors
         await self._store.async_save(self._state_data)
 
         target_dir = self.entry.data.get(CONF_TARGET_DIR)
@@ -236,7 +253,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             files_backed_up_total=self._files_backed_up_total,
             last_run_files_downloaded=stats.files_downloaded,
             last_run_files_skipped=stats.files_skipped,
-            last_run_errors=stats.errors,
+            last_run_errors=errors,
             free_space_bytes=free,
             in_progress=False,
         )
