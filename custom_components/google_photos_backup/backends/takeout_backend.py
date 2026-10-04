@@ -62,7 +62,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -447,9 +447,13 @@ class TakeoutBackend(BackupBackend):
         limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
         downloaded_ids: list[str] = self.state.get("downloaded_drive_file_ids", [])
 
-        query = "name contains 'takeout-' and trashed = false"
+        # 'me' in owners: without it, files.list also returns everything
+        # *shared with* the user - anyone could share a "takeout-x.zip"
+        # with them and have it downloaded and imported into the library.
+        # Takeout's scheduled exports always land in the user's own Drive.
+        query = "name contains 'takeout-' and trashed = false and 'me' in owners"
         if folder_id:
-            query += f" and '{folder_id}' in parents"
+            query += f" and {_drive_query_literal(folder_id)} in parents"
 
         files: list[dict[str, Any]] = []
         page_token: str | None = None
@@ -481,6 +485,14 @@ class TakeoutBackend(BackupBackend):
             if not file_id or file_id in downloaded_ids:
                 continue
             if not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
+                continue
+            if not _is_plain_filename(name):
+                # Drive allows "/" in names - joined onto watch_dir as-is,
+                # "../../x/takeout-1.zip" or "/abs/takeout-1.zip" would be
+                # written (and a mismatching file there deleted) outside it.
+                stats.errors.append(
+                    f"Skipped Drive file {name!r}: not a plain file name"
+                )
                 continue
 
             await self._wait_if_paused()
@@ -642,14 +654,19 @@ class TakeoutBackend(BackupBackend):
         """
         try:
             archive_size = archive.stat().st_size
+        except OSError:
+            return  # Can't tell - let the extraction itself decide.
+        TakeoutBackend._require_free_space(archive.name, int(archive_size * 1.2), extract_dir)
+
+    @staticmethod
+    def _require_free_space(name: str, required: int, extract_dir: Path) -> None:
+        try:
             free = shutil.disk_usage(extract_dir).free
         except OSError:
             return  # Can't tell - let the extraction itself decide.
-
-        required = int(archive_size * 1.2)
         if free < required:
             raise ValueError(
-                f"Not enough free disk space to extract: {archive.name} needs "
+                f"Not enough free disk space to extract: {name} needs "
                 f"about {required // (1024 * 1024)} MiB, but only "
                 f"{free // (1024 * 1024)} MiB are available under {extract_dir}. The "
                 "archive is left in place and retried on the next run."
@@ -673,6 +690,13 @@ class TakeoutBackend(BackupBackend):
             # needed here, unlike tarfile below.
             with zipfile.ZipFile(archive) as zf:
                 members = zf.infolist()
+                # The real uncompressed total from the central directory
+                # (zipfile enforces each member's declared size while
+                # extracting) - catches a zip bomb, which the compressed-
+                # size estimate in _check_free_space can't.
+                self._require_free_space(
+                    archive.name, sum(m.file_size for m in members), dest
+                )
                 stats.extract_files_total = len(members)
                 stats.extract_files_done = 0
                 self._report_progress_threadsafe(stats)
@@ -687,7 +711,13 @@ class TakeoutBackend(BackupBackend):
             # extractall(filter="data")), so only a before/after report
             # rather than the zip path's granular one.
             with tarfile.open(archive, "r:gz") as tf:
-                stats.extract_files_total = len(tf.getmembers())
+                tar_members = tf.getmembers()
+                # getmembers() already had to read the whole stream; the
+                # declared sizes are enforced by tarfile on extraction.
+                self._require_free_space(
+                    archive.name, sum(m.size for m in tar_members), dest
+                )
+                stats.extract_files_total = len(tar_members)
                 stats.extract_files_done = 0
                 self._report_progress_threadsafe(stats)
                 _safe_tar_extractall(tf, dest)
@@ -751,6 +781,26 @@ class TakeoutBackend(BackupBackend):
                 best_len = prefix_len
                 best = candidate
         return best
+
+
+def _is_plain_filename(name: str) -> bool:
+    """True for a bare file name: no directory part, no traversal, nothing
+    that Path joining could turn into a different location."""
+    return (
+        bool(name)
+        and name not in (".", "..")
+        and "\\" not in name
+        and "\x00" not in name
+        and PurePosixPath(name).name == name
+    )
+
+
+def _drive_query_literal(value: str) -> str:
+    """Quote a value as a Drive API query string literal - backslash and
+    single quote have to be escaped, otherwise a folder ID containing them
+    breaks out of the literal and changes the query."""
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{escaped}'"
 
 
 def _is_takeout_content(path: Path) -> bool:

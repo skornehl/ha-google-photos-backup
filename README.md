@@ -294,7 +294,9 @@ same Application Credentials/Google Cloud project - see step 0 below) and
 then polls Google Drive on every sync for files named `takeout-*`
 (Takeout's own naming, e.g. `takeout-20250801T000000Z-001.zip`),
 optionally restricted to one Drive folder ID, and downloads new ones
-straight into `takeout_watch_dir`.
+straight into `takeout_watch_dir`. Only files **you own** are considered -
+files other people shared with you are ignored even if their name matches,
+so nobody can slip an archive into your library by sharing it with you.
 
 0. In the same Google Cloud project as step 1 above, enable the **Google
    Drive API**, and add both the `drive.readonly` and `drive.metadata`
