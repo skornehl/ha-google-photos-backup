@@ -19,6 +19,7 @@ import logging
 import shutil
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -103,6 +104,12 @@ class RcloneBackend(BackupBackend):
             "--create-empty-src-dirs=false",
             "--stats=10s",
             "--stats-one-line",
+            # Per-file "Copied (new)" lines are INFO level and never appear
+            # at rclone's default NOTICE level - counting those always gave
+            # 0. The periodic stats lines carry cumulative totals instead
+            # (see _parse_json_log); they default to INFO too, so raise them.
+            "--stats-log-level",
+            "NOTICE",
         ]
         limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
         if limit_kbps > 0:
@@ -132,8 +139,11 @@ class RcloneBackend(BackupBackend):
         finally:
             self._proc = None
 
-        self._parse_json_log(stderr.decode(errors="replace"), stats)
-        self._parse_json_log(stdout.decode(errors="replace"), stats)
+        # One pass over both streams (rclone logs to stderr by default), so
+        # "last stats line wins" in _parse_json_log sees all of them.
+        self._parse_json_log(
+            stderr.decode(errors="replace") + "\n" + stdout.decode(errors="replace"), stats
+        )
 
         if proc.returncode != 0:
             stats.errors.append(
@@ -147,7 +157,17 @@ class RcloneBackend(BackupBackend):
 
     @staticmethod
     def _parse_json_log(text: str, stats: BackupStats) -> None:
-        """rclone --use-json-log emits one JSON object per line."""
+        """rclone --use-json-log emits one JSON object per line.
+
+        Stats lines carry a `stats` object (same shape as the rc call
+        core/stats) with cumulative totals - the last one seen wins:
+        `transfers` = files copied, `bytes` = bytes copied, `checks` =
+        files compared against an existing copy (counted as skipped; a
+        changed file would count as both, which for photos practically
+        doesn't happen). Per-file "Copied" lines only exist at INFO level
+        (`-v`), and are only used when no stats line was logged at all.
+        """
+        final: dict[str, Any] | None = None
         for line in text.splitlines():
             line = line.strip()
             if not line or not line.startswith("{"):
@@ -156,6 +176,12 @@ class RcloneBackend(BackupBackend):
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(entry, dict):
+                continue
+
+            if isinstance(entry.get("stats"), dict):
+                final = entry["stats"]
+                continue
 
             level = entry.get("level")
             msg = entry.get("msg", "")
@@ -163,8 +189,6 @@ class RcloneBackend(BackupBackend):
                 stats.errors.append(msg)
                 continue
 
-            # rclone tags per-file completion messages with object/size once
-            # a transfer finishes; count those as downloaded files.
             if entry.get("object") and "Copied" in msg:
                 stats.files_downloaded += 1
                 size = entry.get("size")
@@ -172,3 +196,12 @@ class RcloneBackend(BackupBackend):
                     stats.bytes_downloaded += int(size)
             elif entry.get("object") and ("skipped" in msg.lower() or "unchanged" in msg.lower()):
                 stats.files_skipped += 1
+
+        if final is not None:
+            stats.files_downloaded = _int(final.get("transfers"))
+            stats.bytes_downloaded = _int(final.get("bytes"))
+            stats.files_skipped = _int(final.get("checks"))
+
+
+def _int(value: Any) -> int:
+    return int(value) if isinstance(value, (int, float)) else 0
