@@ -404,6 +404,7 @@ class LibraryApiBackend(BackupBackend):
 
         processed_ids.append(item_id)
         self.state.set("processed_ids", processed_ids)
+        self.state.request_save()
         stats.files_downloaded += 1
         stats.bytes_downloaded += size
         self._report_progress(stats)
