@@ -58,10 +58,6 @@ class BandwidthPacer:
             await asyncio.sleep(delay)
 
 
-#: Backwards-compatible alias - older call sites constructed _Pacer.
-_Pacer = BandwidthPacer
-
-
 async def throttled_stream_to_file(
     resp: ClientResponse,
     dest_path: Path,

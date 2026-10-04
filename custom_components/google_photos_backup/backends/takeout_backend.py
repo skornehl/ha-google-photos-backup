@@ -62,7 +62,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -194,10 +194,15 @@ class TakeoutBackend(BackupBackend):
             # already on it, rather than blocking forever.
             await queue.put(None)
 
-        # name -> Drive file ID, persisted across runs so an archive that
-        # downloaded fine but failed to *import* last run still gets
-        # cleaned up from Drive once it does import successfully.
-        drive_ids_by_name: dict[str, str] = self.state.get("drive_file_id_by_name", {})
+        # Archives imported in an earlier run whose Drive copy was never
+        # cleaned up: the first run used to look names up in a dict that
+        # was never the one stored in state (see _forget_drive_file), so
+        # every archive of a user's first - and biggest - export stayed
+        # in Drive for good. Settle those before importing anything new.
+        processed_before = set(self.state.get("processed_archives", []))
+        for name in list(self.state.get("drive_file_id_by_name", {})):
+            if name in processed_before:
+                await self._forget_drive_file(name, stats, delete_drive_after)
 
         async def _consume() -> None:
             while True:
@@ -221,22 +226,23 @@ class TakeoutBackend(BackupBackend):
                     )
                 except (zipfile.BadZipFile, tarfile.ReadError) as err:
                     # A truncated/corrupted download, not a transient
-                    # problem retrying the same bytes would fix - without
-                    # deleting it, every future run finds this exact file
-                    # again via _list_new_archives and fails identically
-                    # forever. Delete it so it's both missing from disk
-                    # and still absent from processed_archives, which
-                    # makes the next run's download loop treat it as
-                    # never-downloaded and fetch a fresh copy.
+                    # problem retrying the same bytes would fix - left in
+                    # place, every future run finds this exact file again
+                    # via _list_new_archives and fails identically forever.
+                    # Get it out of the way (still absent from
+                    # processed_archives), so the next run's download
+                    # loops treat it as never-downloaded and fetch a fresh
+                    # copy - see _discard_corrupt_archive.
+                    where = await self._discard_corrupt_archive(archive, delete_local_after)
                     stats.errors.append(
-                        f"{archive.name}: corrupt archive ({err}) - deleted, "
-                        "will be re-downloaded next run"
+                        f"{archive.name}: corrupt archive ({err}) - {where}. If it "
+                        "came from Drive sync or the captured session, it is "
+                        "downloaded again on the next run."
                     )
                     stats.extract_archive = None
                     stats.extract_action = None
                     stats.extract_files_done = stats.extract_files_total = 0
                     stats.import_files_done = stats.import_files_total = 0
-                    await self.hass.async_add_executor_job(archive.unlink, True)
                     continue
                 except Exception as err:  # noqa: BLE001
                     stats.errors.append(f"{archive.name}: {err}")
@@ -260,11 +266,7 @@ class TakeoutBackend(BackupBackend):
                 # never right after download - an archive that downloaded
                 # fine but failed to extract/import must stay in Drive so
                 # it isn't lost.
-                drive_file_id = drive_ids_by_name.pop(archive.name, None)
-                if drive_file_id is not None:
-                    self.state.set("drive_file_id_by_name", drive_ids_by_name)
-                    if delete_drive_after:
-                        await self._cleanup_drive_file(drive_file_id, archive.name, stats)
+                await self._forget_drive_file(archive.name, stats, delete_drive_after)
 
                 if delete_local_after:
                     await self.hass.async_add_executor_job(archive.unlink, True)
@@ -293,8 +295,9 @@ class TakeoutBackend(BackupBackend):
         session_info = parse_curl_session(raw)
         if session_info is None:
             stats.errors.append(
-                "Could not parse takeout_curl_session - paste the full cURL "
-                "or PowerShell command exactly as copied from DevTools "
+                "Could not parse takeout_curl_session - it needs a cookie and "
+                "an https:// download URL on a Google host. Paste the full "
+                "cURL or PowerShell command exactly as copied from DevTools "
                 "(Network tab, right-click the Download request, "
                 "Copy as cURL/Copy as PowerShell). See README."
             )
@@ -446,9 +449,13 @@ class TakeoutBackend(BackupBackend):
         limit_kbps = self._option(CONF_BANDWIDTH_LIMIT_KBPS, DEFAULT_BANDWIDTH_LIMIT_KBPS)
         downloaded_ids: list[str] = self.state.get("downloaded_drive_file_ids", [])
 
-        query = "name contains 'takeout-' and trashed = false"
+        # 'me' in owners: without it, files.list also returns everything
+        # *shared with* the user - anyone could share a "takeout-x.zip"
+        # with them and have it downloaded and imported into the library.
+        # Takeout's scheduled exports always land in the user's own Drive.
+        query = "name contains 'takeout-' and trashed = false and 'me' in owners"
         if folder_id:
-            query += f" and '{folder_id}' in parents"
+            query += f" and {_drive_query_literal(folder_id)} in parents"
 
         files: list[dict[str, Any]] = []
         page_token: str | None = None
@@ -480,6 +487,14 @@ class TakeoutBackend(BackupBackend):
             if not file_id or file_id in downloaded_ids:
                 continue
             if not any(name.lower().endswith(suf) for suf in TAKEOUT_ARCHIVE_SUFFIXES):
+                continue
+            if not _is_plain_filename(name):
+                # Drive allows "/" in names - joined onto watch_dir as-is,
+                # "../../x/takeout-1.zip" or "/abs/takeout-1.zip" would be
+                # written (and a mismatching file there deleted) outside it.
+                stats.errors.append(
+                    f"Skipped Drive file {name!r}: not a plain file name"
+                )
                 continue
 
             await self._wait_if_paused()
@@ -557,6 +572,51 @@ class TakeoutBackend(BackupBackend):
         name_map[name] = file_id
         self.state.set("drive_file_id_by_name", name_map)
 
+    async def _forget_drive_file(self, name: str, stats: BackupStats, cleanup: bool) -> None:
+        """Drop a successfully imported archive from drive_file_id_by_name
+        and, if `cleanup`, trash/delete its Drive copy.
+
+        Reads the map from state on every call rather than holding on to
+        one dict for the whole run: when the key doesn't exist yet,
+        state.get() returns a fresh default each time, so a dict captured
+        at the start of the first run never saw what _remember_drive_file
+        stored during it."""
+        name_map: dict[str, str] = self.state.get("drive_file_id_by_name", {})
+        file_id = name_map.pop(name, None)
+        if file_id is None:
+            return
+        self.state.set("drive_file_id_by_name", name_map)
+        if cleanup:
+            await self._cleanup_drive_file(file_id, name, stats)
+
+    async def _discard_corrupt_archive(self, archive: Path, delete: bool) -> str:
+        """Move a corrupt archive out of the way so it gets downloaded again,
+        and return a short description of what happened to it.
+
+        Deleted only when the user opted into takeout_delete_after_import -
+        a manually placed archive can't be re-fetched by us, so by default
+        it's renamed to `<name>.corrupt` (no longer matched by
+        _list_new_archives) for the user to inspect or remove.
+
+        A Drive-synced archive is also dropped from downloaded_drive_file_ids:
+        _sync_drive_folder skips every ID in there, so without this the
+        archive would never be downloaded again despite the error saying
+        so."""
+        if delete:
+            await self.hass.async_add_executor_job(archive.unlink, True)
+            where = "deleted"
+        else:
+            quarantine = archive.with_name(archive.name + ".corrupt")
+            await self.hass.async_add_executor_job(os.replace, archive, quarantine)
+            where = f"moved to {quarantine.name}"
+
+        file_id = self.state.get("drive_file_id_by_name", {}).get(archive.name)
+        downloaded_ids: list[str] = self.state.get("downloaded_drive_file_ids", [])
+        if file_id is not None and file_id in downloaded_ids:
+            downloaded_ids.remove(file_id)
+            self.state.set("downloaded_drive_file_ids", downloaded_ids)
+        return where
+
     async def _cleanup_drive_file(self, file_id: str, name: str, stats: BackupStats) -> None:
         """Trash (default) or permanently delete an archive from Drive
         after it has been successfully imported. Only called when
@@ -575,7 +635,19 @@ class TakeoutBackend(BackupBackend):
         try:
             if permanently:
                 resp = await self._oauth.async_request("DELETE", f"{DRIVE_API_BASE}/files/{file_id}")
-            else:
+                if resp.status == 403:
+                    # files.delete only accepts the full `drive` scope (or
+                    # drive.file/drive.appdata, which don't cover files
+                    # Takeout created) - this integration deliberately
+                    # requests drive.metadata instead, which is enough to
+                    # trash but not to delete. Trash is the next best thing.
+                    stats.errors.append(
+                        f"{name}: Google refused permanent deletion (it needs the "
+                        "full 'drive' scope, which this integration does not "
+                        "request) - moved to Drive's trash instead."
+                    )
+                    permanently = False
+            if not permanently:
                 resp = await self._oauth.async_request(
                     "PATCH", f"{DRIVE_API_BASE}/files/{file_id}", json={"trashed": True}
                 )
@@ -641,14 +713,19 @@ class TakeoutBackend(BackupBackend):
         """
         try:
             archive_size = archive.stat().st_size
+        except OSError:
+            return  # Can't tell - let the extraction itself decide.
+        TakeoutBackend._require_free_space(archive.name, int(archive_size * 1.2), extract_dir)
+
+    @staticmethod
+    def _require_free_space(name: str, required: int, extract_dir: Path) -> None:
+        try:
             free = shutil.disk_usage(extract_dir).free
         except OSError:
             return  # Can't tell - let the extraction itself decide.
-
-        required = int(archive_size * 1.2)
         if free < required:
             raise ValueError(
-                f"Not enough free disk space to extract: {archive.name} needs "
+                f"Not enough free disk space to extract: {name} needs "
                 f"about {required // (1024 * 1024)} MiB, but only "
                 f"{free // (1024 * 1024)} MiB are available under {extract_dir}. The "
                 "archive is left in place and retried on the next run."
@@ -672,6 +749,13 @@ class TakeoutBackend(BackupBackend):
             # needed here, unlike tarfile below.
             with zipfile.ZipFile(archive) as zf:
                 members = zf.infolist()
+                # The real uncompressed total from the central directory
+                # (zipfile enforces each member's declared size while
+                # extracting) - catches a zip bomb, which the compressed-
+                # size estimate in _check_free_space can't.
+                self._require_free_space(
+                    archive.name, sum(m.file_size for m in members), dest
+                )
                 stats.extract_files_total = len(members)
                 stats.extract_files_done = 0
                 self._report_progress_threadsafe(stats)
@@ -681,13 +765,18 @@ class TakeoutBackend(BackupBackend):
                     if i % 50 == 0 or i == len(members):
                         self._report_progress_threadsafe(stats)
         elif name.endswith(".tgz") or name.endswith(".tar.gz"):
-            # _safe_tar_extractall does its own security-relevant
-            # member-by-member checking (path traversal / symlinks,
-            # CVE-2007-4559) - left untouched rather than restructured
-            # for per-member progress, so only a before/after report
-            # here rather than the zip path's granular one.
+            # tarfile has no per-member extraction loop worth exposing
+            # here (_safe_tar_extractall hands the whole archive to
+            # extractall(filter="data")), so only a before/after report
+            # rather than the zip path's granular one.
             with tarfile.open(archive, "r:gz") as tf:
-                stats.extract_files_total = len(tf.getmembers())
+                tar_members = tf.getmembers()
+                # getmembers() already had to read the whole stream; the
+                # declared sizes are enforced by tarfile on extraction.
+                self._require_free_space(
+                    archive.name, sum(m.size for m in tar_members), dest
+                )
+                stats.extract_files_total = len(tar_members)
                 stats.extract_files_done = 0
                 self._report_progress_threadsafe(stats)
                 _safe_tar_extractall(tf, dest)
@@ -753,6 +842,26 @@ class TakeoutBackend(BackupBackend):
         return best
 
 
+def _is_plain_filename(name: str) -> bool:
+    """True for a bare file name: no directory part, no traversal, nothing
+    that Path joining could turn into a different location."""
+    return (
+        bool(name)
+        and name not in (".", "..")
+        and "\\" not in name
+        and "\x00" not in name
+        and PurePosixPath(name).name == name
+    )
+
+
+def _drive_query_literal(value: str) -> str:
+    """Quote a value as a Drive API query string literal - backslash and
+    single quote have to be escaped, otherwise a folder ID containing them
+    breaks out of the literal and changes the query."""
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{escaped}'"
+
+
 def _is_takeout_content(path: Path) -> bool:
     """True for anything in an extracted archive that should be backed up -
     i.e. everything except Takeout's own metadata files, see
@@ -770,41 +879,14 @@ def _common_prefix_len(a: str, b: str) -> int:
 
 
 def _safe_tar_extractall(tf: tarfile.TarFile, dest: Path) -> None:
-    """Extract a tar archive, rejecting any member that would land outside
-    `dest` or that is a symlink/hardlink (path traversal / "Zip Slip" for
-    tar, CVE-2007-4559).
+    """Extract a tar archive without letting any member land outside `dest`
+    (path traversal / "Zip Slip" for tar, CVE-2007-4559).
 
-    Unlike zipfile, tarfile.extractall() only defends against this by
-    default starting with Python 3.14 (PEP 706's `filter="data"` becoming
-    the default). Takeout .tgz archives can reach this code via Drive
-    sync, not just manually placed files, so this can't rely on "Google
-    is trusted" - and Home Assistant can run on Python versions well
-    before 3.14.
-
-    Strategy: prefer the real `filter="data"` where available (Python
-    3.12+, does more than just path-traversal checking - also drops
-    dangerous permission bits etc.); on older Python where `extractall()`
-    doesn't accept `filter` at all, fall back to a manual check that
-    covers at least the path-traversal and symlink/hardlink cases.
+    Takeout .tgz archives can reach this code via Drive sync, not just
+    manually placed files, so this can't rely on "Google is trusted".
+    `filter="data"` (PEP 706) rejects traversal, absolute paths, links
+    pointing outside `dest`, device files and dangerous permission bits.
+    Passed explicitly rather than relying on Python 3.14 making it the
+    default; every Python Home Assistant supports has it.
     """
-    try:
-        tf.extractall(dest, filter="data")
-        return
-    except TypeError:
-        pass  # Python < 3.12: extractall() has no `filter` parameter yet.
-
-    dest_resolved = dest.resolve()
-    for member in tf.getmembers():
-        if member.issym() or member.islnk():
-            raise ValueError(
-                f"Takeout archive contains a symlink/hardlink, rejecting it: {member.name}"
-            )
-        member_path = (dest / member.name).resolve()
-        try:
-            member_path.relative_to(dest_resolved)
-        except ValueError:
-            raise ValueError(
-                "Takeout archive contains a path outside the target directory "
-                f"(possible path traversal attempt): {member.name}"
-            ) from None
-    tf.extractall(dest)
+    tf.extractall(dest, filter="data")

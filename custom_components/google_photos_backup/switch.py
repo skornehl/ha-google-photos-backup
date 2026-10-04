@@ -4,12 +4,11 @@ from __future__ import annotations
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_BACKEND, DOMAIN
+from .const import DOMAIN
 from .coordinator import GooglePhotosBackupCoordinator
+from .entity import GooglePhotosBackupEntity
 
 
 async def async_setup_entry(
@@ -19,7 +18,7 @@ async def async_setup_entry(
     async_add_entities([PauseDownloadSwitch(coordinator, entry)])
 
 
-class PauseDownloadSwitch(CoordinatorEntity[GooglePhotosBackupCoordinator], SwitchEntity):
+class PauseDownloadSwitch(GooglePhotosBackupEntity, SwitchEntity):
     """Pauses an in-progress (or not-yet-started) download.
 
     Turning this on doesn't cancel or abandon anything - it just makes the
@@ -33,21 +32,10 @@ class PauseDownloadSwitch(CoordinatorEntity[GooglePhotosBackupCoordinator], Swit
     for the next progress tick.
     """
 
-    _attr_has_entity_name = True
-    _attr_translation_key = "pause_download"
     _attr_icon = "mdi:pause-circle-outline"
 
     def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_pause_download"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Google Photos Backup",
-            model=entry.data.get(CONF_BACKEND),
-            entry_type=DeviceEntryType.SERVICE,
-        )
+        super().__init__(coordinator, entry, "pause_download")
 
     @property
     def is_on(self) -> bool:

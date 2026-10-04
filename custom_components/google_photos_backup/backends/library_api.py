@@ -63,6 +63,20 @@ from .throttle import BandwidthPacer, throttled_stream_to_file
 _LOGGER = logging.getLogger(__name__)
 
 
+def _safe_filename(raw: Any, *, fallback: str) -> str:
+    """Reduce an API-supplied filename to a bare name inside the date folder.
+
+    The filename is whatever the uploader called the file - for items from
+    a shared album, that's someone else. Joined onto the target directory
+    as-is, "../../x.jpg" or an absolute path would be written outside it.
+    A missing (None) filename used to raise TypeError at the path join.
+    """
+    if not isinstance(raw, str):
+        return fallback
+    name = os.path.basename(raw.replace("\\", "/")).replace("\x00", "")
+    return fallback if name in ("", ".", "..") else name
+
+
 class LibraryApiBackend(BackupBackend):
     """OAuth2-based backend combining the Library API and Picker API."""
 
@@ -109,19 +123,18 @@ class LibraryApiBackend(BackupBackend):
         return picker_uri
 
     async def async_run_backup(self) -> BackupStats:
-        """Downloads run strictly sequentially, one item at a time.
+        """Finish a pending picker session, then sync app-created items.
 
-        Deliberate, not an oversight (see issue #20): concurrency here
-        would need to share a single bandwidth budget across workers to
-        keep the bandwidth_limit_kbps option meaningful (throttle.py's
-        pacer is per-download), and would multiply the request rate
-        against an API whose rate limits aren't documented in a way we
-        can safely tune against. Sequential is slower for very large
-        picker selections but predictable, and it keeps the throttle
-        semantics honest. Revisit with an explicit semaphore + shared
-        pacer if that ever becomes the actual bottleneck.
+        Picker downloads run concurrently (download_concurrency, issue
+        #20) with one shared BandwidthPacer, so bandwidth_limit_kbps stays
+        a total across workers - see _finish_pending_picker_session.
         """
         stats = BackupStats()
+        # Outside every try/except below on purpose: those turn any error
+        # into a stats.errors line, which would also swallow a revoked or
+        # expired grant. Raised from here, the coordinator maps it to
+        # ConfigEntryAuthFailed and HA starts the reauth flow.
+        await self._oauth.async_ensure_token_valid()
         await self._finish_pending_picker_session(stats)
         await self._sync_app_created_items(stats)
         return stats
@@ -329,7 +342,7 @@ class LibraryApiBackend(BackupBackend):
 
         media_file = item.get("mediaFile", {})
         base_url = media_file.get("baseUrl")
-        filename = media_file.get("filename", f"{item_id}.jpg")
+        filename = _safe_filename(media_file.get("filename"), fallback=f"{item_id}.jpg")
         mime_type = media_file.get("mimeType", "")
         if not base_url:
             stats.errors.append(f"{filename}: no baseUrl in the picker response")

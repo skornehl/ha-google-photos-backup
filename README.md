@@ -21,8 +21,11 @@ custom_components/google_photos_backup/
 ├── config_flow.py           # backend selection + backend-specific options
 ├── const.py
 ├── coordinator.py           # DataUpdateCoordinator, persisted sync state
+├── diagnostics.py           # redacted diagnostics export
+├── entity.py                # shared base entity (device info, unique_id)
 ├── sensor.py                # last_sync, files_backed_up, last_error, free_space,
-│                             # current_activity, progress_percent
+│                             # download/extract activity, progress and speed
+├── switch.py                # pause_download
 ├── repairs.py               # fix flow for the curl_session_expired repair issue
 ├── services.yaml
 ├── strings.json / translations/{en,de}.json
@@ -260,6 +263,17 @@ once.
    configurable safety cap (`takeout_curl_max_files`, default 100).
    Already-downloaded files are skipped on a later run.
 
+**Treat the pasted command like a password.** It contains your Google
+account's browser session cookies - whoever gets hold of it can act as you
+on Google for as long as those cookies stay valid, which can be much
+longer than the download itself keeps working. Home Assistant stores it
+unencrypted in `.storage/core.config_entries`, so it is also part of every
+Home Assistant backup. The integration only accepts commands whose URL is
+`https://` on a Google host (`takeout.google.com`,
+`*.usercontent.google.com`, ...), only ever sends the cookies there, and
+strips the field from diagnostics exports. Clear the field again once an
+export has been fully downloaded if you don't need it any more.
+
 **When the session expires** (~1 hour, or if Google was never actually
 signed in to that captured request): the run stops, reports a clear error
 naming the file it got stuck on, and raises a **repair issue** under
@@ -280,7 +294,9 @@ same Application Credentials/Google Cloud project - see step 0 below) and
 then polls Google Drive on every sync for files named `takeout-*`
 (Takeout's own naming, e.g. `takeout-20250801T000000Z-001.zip`),
 optionally restricted to one Drive folder ID, and downloads new ones
-straight into `takeout_watch_dir`.
+straight into `takeout_watch_dir`. Only files **you own** are considered -
+files other people shared with you are ignored even if their name matches,
+so nobody can slip an archive into your library by sharing it with you.
 
 0. In the same Google Cloud project as step 1 above, enable the **Google
    Drive API**, and add both the `drive.readonly` and `drive.metadata`
@@ -333,6 +349,11 @@ is enabled:
   you need this option on too. **This is not recoverable** - only enable
   it once you've confirmed a few sync runs actually produced correct,
   complete local backups.
+  *Scope caveat (checked against the Drive API reference 2026-10-04):*
+  `files.delete` only accepts the full `drive` scope, and this integration
+  deliberately requests the narrower `drive.metadata` (enough to trash, not
+  to delete). With that grant Google refuses the permanent delete; the
+  archive is then moved to the trash instead and the error sensor says so.
 
 #### Large libraries: first full export without Drive storage
 
