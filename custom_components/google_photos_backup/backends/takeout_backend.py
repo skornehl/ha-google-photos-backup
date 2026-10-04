@@ -56,6 +56,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -125,6 +126,8 @@ SIDECAR_PATTERNS = (
     "{name}.suppl.json",
     "{name}.supplemental-metadata.json",
 )
+# "IMG_1(1).jpg" -> ("IMG_1", "1", ".jpg"), see _find_sidecar.
+_DUPLICATE_NAME = re.compile(r"^(.*)\((\d+)\)(\.[^.]+)$")
 
 
 class TakeoutBackend(BackupBackend):
@@ -187,12 +190,17 @@ class TakeoutBackend(BackupBackend):
         stats.archives_total = len(pre_existing)
 
         async def _produce() -> None:
-            await self._download_via_curl_session(watch_dir, stats, queue)
-            await self._sync_drive_folder(watch_dir, stats, queue)
-            # Sentinel: tells the consumer no more archives are coming, so
-            # it can stop waiting on the queue once it has drained what's
-            # already on it, rather than blocking forever.
-            await queue.put(None)
+            try:
+                await self._download_via_curl_session(watch_dir, stats, queue)
+                await self._sync_drive_folder(watch_dir, stats, queue)
+            finally:
+                # Sentinel: tells the consumer no more archives are coming,
+                # so it stops once it has drained what's already queued.
+                # In `finally` because a producer can raise (a revoked
+                # Drive token, say) - without the sentinel the consumer
+                # would wait on the queue forever as an orphaned task,
+                # still importing in the background alongside the next run.
+                queue.put_nowait(None)
 
         # Archives imported in an earlier run whose Drive copy was never
         # cleaned up: the first run used to look names up in a dict that
@@ -239,27 +247,24 @@ class TakeoutBackend(BackupBackend):
                         "came from Drive sync or the captured session, it is "
                         "downloaded again on the next run."
                     )
-                    stats.extract_archive = None
-                    stats.extract_action = None
-                    stats.extract_files_done = stats.extract_files_total = 0
-                    stats.import_files_done = stats.import_files_total = 0
+                    _reset_extract_progress(stats)
                     continue
                 except Exception as err:  # noqa: BLE001
                     stats.errors.append(f"{archive.name}: {err}")
-                    stats.extract_archive = None
-                    stats.extract_action = None
-                    stats.extract_files_done = stats.extract_files_total = 0
-                    stats.import_files_done = stats.import_files_total = 0
+                    _reset_extract_progress(stats)
                     continue
 
                 processed_archives: list[str] = self.state.get("processed_archives", [])
                 processed_archives.append(archive.name)
                 self.state.set("processed_archives", processed_archives)
+                # Persist now, not only at the end of the run: a multi-day
+                # first import is exactly when HA restarts or the entry
+                # reloads, and a lost processed_hashes/processed_archives
+                # means the next run imports everything again as `_1`
+                # duplicates (the files themselves were already moved).
+                self.state.request_save()
                 stats.archives_done += 1
-                stats.extract_archive = None
-                stats.extract_action = None
-                stats.extract_files_done = stats.extract_files_total = 0
-                stats.import_files_done = stats.import_files_total = 0
+                _reset_extract_progress(stats)
                 self._report_progress(stats)
 
                 # Only clean up from Drive *after* a successful import,
@@ -271,7 +276,13 @@ class TakeoutBackend(BackupBackend):
                 if delete_local_after:
                     await self.hass.async_add_executor_job(archive.unlink, True)
 
-        await asyncio.gather(_produce(), _consume())
+        # return_exceptions so a failing producer doesn't return early and
+        # leave the consumer running detached: wait for both, then surface
+        # the first failure (e.g. a revoked token, for the reauth flow).
+        results = await asyncio.gather(_produce(), _consume(), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
         return stats
 
     # -- cURL/PowerShell captured session (cookie-authenticated, no OAuth) ---
@@ -677,15 +688,23 @@ class TakeoutBackend(BackupBackend):
             tmp_path = Path(tmp)
             self._check_free_space(archive, tmp_path)
             self._extract(archive, tmp_path, stats)
-            media_files = [
-                p for p in tmp_path.rglob("*") if p.is_file() and _is_takeout_content(p)
-            ]
+            media_files: list[Path] = []
+            json_by_dir: dict[Path, list[Path]] = {}
+            for p in tmp_path.rglob("*"):
+                if not p.is_file():
+                    continue
+                if _is_takeout_content(p):
+                    media_files.append(p)
+                elif p.suffix.lower() == ".json":
+                    json_by_dir.setdefault(p.parent, []).append(p)
             stats.extract_action = "moving"
             stats.import_files_total = len(media_files)
             stats.import_files_done = 0
             self._report_progress_threadsafe(stats)
             for i, media_file in enumerate(media_files, 1):
-                self._import_media_file(media_file, target_dir, stats)
+                self._import_media_file(
+                    media_file, target_dir, stats, json_by_dir.get(media_file.parent, [])
+                )
                 stats.import_files_done = i
                 # See _extract's identical throttle for why every-50th
                 # rather than every file.
@@ -785,13 +804,19 @@ class TakeoutBackend(BackupBackend):
         else:
             raise ValueError(f"Unknown archive format: {archive.name}")
 
-    def _import_media_file(self, media_file: Path, target_dir: str, stats: BackupStats) -> None:
+    def _import_media_file(
+        self,
+        media_file: Path,
+        target_dir: str,
+        stats: BackupStats,
+        json_candidates: list[Path] | None = None,
+    ) -> None:
         digest = sha256_file(media_file)
         if digest in self.state.processed_hashes:
             stats.files_skipped += 1
             return
 
-        taken_at = self._resolve_taken_at(media_file)
+        taken_at = self._resolve_taken_at(media_file, json_candidates)
         dest_dir = dest_dir_for_date(target_dir, taken_at)
         dest = unique_destination(dest_dir, media_file.name)
         shutil.move(str(media_file), str(dest))
@@ -802,39 +827,67 @@ class TakeoutBackend(BackupBackend):
         stats.files_downloaded += 1
         stats.bytes_downloaded += dest.stat().st_size
 
-    def _resolve_taken_at(self, media_file: Path) -> datetime:
-        sidecar = self._find_sidecar(media_file)
+    def _resolve_taken_at(
+        self, media_file: Path, json_candidates: list[Path] | None = None
+    ) -> datetime:
+        sidecar = self._find_sidecar(media_file, json_candidates)
         if sidecar is not None:
             try:
                 payload = json.loads(sidecar.read_text(encoding="utf-8"))
                 ts = int(payload["photoTakenTime"]["timestamp"])
                 return datetime.fromtimestamp(ts, tz=timezone.utc)
-            except (KeyError, ValueError, json.JSONDecodeError):
+            # TypeError (not a dict), OverflowError/OSError (timestamp out of
+            # range): one odd sidecar must not fail - and on every later run
+            # re-fail - the import of the whole archive.
+            except (KeyError, ValueError, TypeError, OverflowError, OSError):
                 _LOGGER.debug("Sidecar %s has no usable timestamp", sidecar)
 
         # Fall back to whatever mtime the archive gave the extracted file
         # (usually the archive creation time, not the photo date - better
-        # than nothing but logged so it's visible in the sensor error list).
-        stats_note = f"{media_file.name}: no sidecar timestamp found, falling back to file mtime"
-        _LOGGER.warning(stats_note)
+        # than nothing, and logged so the misfiled date can be traced).
+        _LOGGER.warning(
+            "%s: no sidecar timestamp found, falling back to file mtime", media_file.name
+        )
         return datetime.fromtimestamp(media_file.stat().st_mtime, tz=timezone.utc)
 
     @staticmethod
-    def _find_sidecar(media_file: Path) -> Path | None:
+    def _find_sidecar(
+        media_file: Path, json_candidates: list[Path] | None = None
+    ) -> Path | None:
+        """`json_candidates`: the *.json files in media_file's directory, if
+        the caller already has them (see _import_archive) - globbing the
+        directory again for every single file made large album folders
+        quadratic."""
         directory = media_file.parent
         for pattern in SIDECAR_PATTERNS:
             candidate = directory / pattern.format(name=media_file.name)
             if candidate.is_file():
                 return candidate
 
+        # Duplicate names: Takeout stores a second "IMG_1.jpg" as
+        # "IMG_1(1).jpg", but puts the counter at the *end* of the sidecar
+        # name ("IMG_1.jpg(1).json", "IMG_1.jpg.supplemental-metadata(1).json").
+        # The prefix fallback below can't tell those apart and would give
+        # the duplicate the original's date.
+        dup = _DUPLICATE_NAME.match(media_file.name)
+        if dup is not None:
+            stem, counter, suffix = dup.groups()
+            for pattern in SIDECAR_PATTERNS:
+                sidecar = pattern.format(name=f"{stem}{suffix}")
+                candidate = directory / f"{sidecar[: -len('.json')]}({counter}).json"
+                if candidate.is_file():
+                    return candidate
+
         # Truncated-filename fallback: Takeout sometimes shortens the
         # sidecar's stem so it no longer matches the media filename
         # exactly. Pick the *.json in the same directory whose name shares
         # the longest prefix with the media filename, if any share at
         # least 8 characters (avoids matching an unrelated sidecar).
+        if json_candidates is None:
+            json_candidates = list(directory.glob("*.json"))
         best: Path | None = None
         best_len = 7
-        for candidate in directory.glob("*.json"):
+        for candidate in json_candidates:
             prefix_len = _common_prefix_len(candidate.stem, media_file.name)
             if prefix_len > best_len:
                 best_len = prefix_len
@@ -860,6 +913,14 @@ def _drive_query_literal(value: str) -> str:
     breaks out of the literal and changes the query."""
     escaped = value.replace("\\", "\\\\").replace("'", "\\'")
     return f"'{escaped}'"
+
+
+def _reset_extract_progress(stats: BackupStats) -> None:
+    """Back to "idle" on the extract track once an archive is done (or failed)."""
+    stats.extract_archive = None
+    stats.extract_action = None
+    stats.extract_files_done = stats.extract_files_total = 0
+    stats.import_files_done = stats.import_files_total = 0
 
 
 def _is_takeout_content(path: Path) -> bool:

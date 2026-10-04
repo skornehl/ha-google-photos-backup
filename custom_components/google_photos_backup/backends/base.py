@@ -82,13 +82,29 @@ class SyncStateStore:
     Kept intentionally dict-based (rather than a strict schema) because each
     backend persists different things (processed media IDs vs. file hashes
     vs. a pending picker session). The coordinator owns the actual
-    homeassistant.helpers.storage.Store instance and calls async_save()
-    after every run; backends only ever touch the in-memory dict returned by
+    homeassistant.helpers.storage.Store instance: it saves after every run
+    and, via `request_save`, whenever a backend has finished a unit of work
+    mid-run. Backends only ever touch the in-memory dict returned by
     `data`.
     """
 
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(
+        self, data: dict[str, Any], request_save: Callable[[], None] | None = None
+    ) -> None:
         self.data = data
+        #: Asks the owner to persist `data` soon (debounced) - backends call
+        #: it after each unit of work (an archive imported, an item
+        #: downloaded) so an interrupted multi-hour run doesn't lose all of
+        #: its progress. Event-loop only; a no-op when None (tests).
+        self._request_save = request_save
+        # Created up front, not lazily from the import's executor thread:
+        # inserting a key there could race the event loop serializing this
+        # dict for a save ("dictionary changed size during iteration").
+        self._hash_list: list[str] = data.setdefault("processed_hashes", [])
+        # Membership is checked once per imported file. Rebuilding a set
+        # from the list on every check (or scanning the list) made a
+        # library-sized import quadratic.
+        self._hash_set: builtins.set[str] = builtins.set(self._hash_list)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -96,17 +112,21 @@ class SyncStateStore:
     def set(self, key: str, value: Any) -> None:
         self.data[key] = value
 
+    def request_save(self) -> None:
+        if self._request_save is not None:
+            self._request_save()
+
     @property
     def processed_hashes(self) -> builtins.set[str]:
         # builtins.set, not set: this class defines a method named `set`,
         # which shadows the builtin inside the class body - a bare
         # `set[str]` annotation here resolves to SyncStateStore.set.
-        return builtins.set(self.data.setdefault("processed_hashes", []))
+        return self._hash_set
 
     def add_processed_hash(self, digest: str) -> None:
-        hashes: list[str] = self.data.setdefault("processed_hashes", [])
-        if digest not in hashes:
-            hashes.append(digest)
+        if digest not in self._hash_set:
+            self._hash_set.add(digest)
+            self._hash_list.append(digest)
 
 
 class BackupBackend(ABC):
