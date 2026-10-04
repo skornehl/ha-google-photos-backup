@@ -21,8 +21,11 @@ custom_components/google_photos_backup/
 ├── config_flow.py           # backend selection + backend-specific options
 ├── const.py
 ├── coordinator.py           # DataUpdateCoordinator, persisted sync state
+├── diagnostics.py           # redacted diagnostics export
+├── entity.py                # shared base entity (device info, unique_id)
 ├── sensor.py                # last_sync, files_backed_up, last_error, free_space,
-│                             # current_activity, progress_percent
+│                             # download/extract activity, progress and speed
+├── switch.py                # pause_download
 ├── repairs.py               # fix flow for the curl_session_expired repair issue
 ├── services.yaml
 ├── strings.json / translations/{en,de}.json

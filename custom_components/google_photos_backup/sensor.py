@@ -7,9 +7,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_DOWNLOAD_ACTIVITY,
@@ -21,10 +19,10 @@ from .const import (
     ATTR_FREE_SPACE,
     ATTR_LAST_ERROR,
     ATTR_LAST_SYNC,
-    CONF_BACKEND,
     DOMAIN,
 )
 from .coordinator import GooglePhotosBackupCoordinator
+from .entity import GooglePhotosBackupEntity
 
 
 async def async_setup_entry(
@@ -46,23 +44,8 @@ async def async_setup_entry(
     )
 
 
-class _BaseSensor(CoordinatorEntity[GooglePhotosBackupCoordinator], SensorEntity):
-    _attr_has_entity_name = True
-
-    def __init__(self, coordinator: GooglePhotosBackupCoordinator, entry: ConfigEntry, key: str) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_translation_key = key
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Google Photos Backup",
-            # Which backend this instance uses, surfaced in the device
-            # dialog so two entries (e.g. one takeout, one rclone) are
-            # distinguishable by more than just their title.
-            model=entry.data.get(CONF_BACKEND),
-            entry_type=DeviceEntryType.SERVICE,
-        )
+class _BaseSensor(GooglePhotosBackupEntity, SensorEntity):
+    pass
 
 
 class LastSyncSensor(_BaseSensor):
@@ -108,9 +91,11 @@ class LastErrorSensor(_BaseSensor):
         super().__init__(coordinator, entry, ATTR_LAST_ERROR)
 
     @property
-    def native_value(self) -> str:
+    def native_value(self) -> str | None:
+        # None (shown as "unknown"), not the string "None" - an automation
+        # checking `state != "None"` was matching on an English word.
         if not self.coordinator.data or not self.coordinator.data.last_run_errors:
-            return "None"
+            return None
         first = self.coordinator.data.last_run_errors[0]
         return first[:255]
 
