@@ -63,6 +63,20 @@ from .throttle import BandwidthPacer, throttled_stream_to_file
 _LOGGER = logging.getLogger(__name__)
 
 
+def _safe_filename(raw: Any, *, fallback: str) -> str:
+    """Reduce an API-supplied filename to a bare name inside the date folder.
+
+    The filename is whatever the uploader called the file - for items from
+    a shared album, that's someone else. Joined onto the target directory
+    as-is, "../../x.jpg" or an absolute path would be written outside it.
+    A missing (None) filename used to raise TypeError at the path join.
+    """
+    if not isinstance(raw, str):
+        return fallback
+    name = os.path.basename(raw.replace("\\", "/")).replace("\x00", "")
+    return fallback if name in ("", ".", "..") else name
+
+
 class LibraryApiBackend(BackupBackend):
     """OAuth2-based backend combining the Library API and Picker API."""
 
@@ -329,7 +343,7 @@ class LibraryApiBackend(BackupBackend):
 
         media_file = item.get("mediaFile", {})
         base_url = media_file.get("baseUrl")
-        filename = media_file.get("filename", f"{item_id}.jpg")
+        filename = _safe_filename(media_file.get("filename"), fallback=f"{item_id}.jpg")
         mime_type = media_file.get("mimeType", "")
         if not base_url:
             stats.errors.append(f"{filename}: no baseUrl in the picker response")
