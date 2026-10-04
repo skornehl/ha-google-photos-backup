@@ -681,11 +681,10 @@ class TakeoutBackend(BackupBackend):
                     if i % 50 == 0 or i == len(members):
                         self._report_progress_threadsafe(stats)
         elif name.endswith(".tgz") or name.endswith(".tar.gz"):
-            # _safe_tar_extractall does its own security-relevant
-            # member-by-member checking (path traversal / symlinks,
-            # CVE-2007-4559) - left untouched rather than restructured
-            # for per-member progress, so only a before/after report
-            # here rather than the zip path's granular one.
+            # tarfile has no per-member extraction loop worth exposing
+            # here (_safe_tar_extractall hands the whole archive to
+            # extractall(filter="data")), so only a before/after report
+            # rather than the zip path's granular one.
             with tarfile.open(archive, "r:gz") as tf:
                 stats.extract_files_total = len(tf.getmembers())
                 stats.extract_files_done = 0
@@ -770,41 +769,14 @@ def _common_prefix_len(a: str, b: str) -> int:
 
 
 def _safe_tar_extractall(tf: tarfile.TarFile, dest: Path) -> None:
-    """Extract a tar archive, rejecting any member that would land outside
-    `dest` or that is a symlink/hardlink (path traversal / "Zip Slip" for
-    tar, CVE-2007-4559).
+    """Extract a tar archive without letting any member land outside `dest`
+    (path traversal / "Zip Slip" for tar, CVE-2007-4559).
 
-    Unlike zipfile, tarfile.extractall() only defends against this by
-    default starting with Python 3.14 (PEP 706's `filter="data"` becoming
-    the default). Takeout .tgz archives can reach this code via Drive
-    sync, not just manually placed files, so this can't rely on "Google
-    is trusted" - and Home Assistant can run on Python versions well
-    before 3.14.
-
-    Strategy: prefer the real `filter="data"` where available (Python
-    3.12+, does more than just path-traversal checking - also drops
-    dangerous permission bits etc.); on older Python where `extractall()`
-    doesn't accept `filter` at all, fall back to a manual check that
-    covers at least the path-traversal and symlink/hardlink cases.
+    Takeout .tgz archives can reach this code via Drive sync, not just
+    manually placed files, so this can't rely on "Google is trusted".
+    `filter="data"` (PEP 706) rejects traversal, absolute paths, links
+    pointing outside `dest`, device files and dangerous permission bits.
+    Passed explicitly rather than relying on Python 3.14 making it the
+    default; every Python Home Assistant supports has it.
     """
-    try:
-        tf.extractall(dest, filter="data")
-        return
-    except TypeError:
-        pass  # Python < 3.12: extractall() has no `filter` parameter yet.
-
-    dest_resolved = dest.resolve()
-    for member in tf.getmembers():
-        if member.issym() or member.islnk():
-            raise ValueError(
-                f"Takeout archive contains a symlink/hardlink, rejecting it: {member.name}"
-            )
-        member_path = (dest / member.name).resolve()
-        try:
-            member_path.relative_to(dest_resolved)
-        except ValueError:
-            raise ValueError(
-                "Takeout archive contains a path outside the target directory "
-                f"(possible path traversal attempt): {member.name}"
-            ) from None
-    tf.extractall(dest)
+    tf.extractall(dest, filter="data")

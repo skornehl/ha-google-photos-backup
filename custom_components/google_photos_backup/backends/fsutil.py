@@ -87,16 +87,5 @@ def unique_destination(
         n += 1
 
 
-def move_into_place(src: Path, dest: Path, *, set_mtime: datetime | None = None) -> int:
-    """Move src to dest (cross-filesystem safe), return byte size."""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(src), str(dest))
-    size = dest.stat().st_size
-    if set_mtime is not None:
-        ts = set_mtime.timestamp()
-        os.utime(dest, (ts, ts))
-    return size
-
-
 def free_bytes(target_dir: str) -> int:
     return shutil.disk_usage(target_dir).free
