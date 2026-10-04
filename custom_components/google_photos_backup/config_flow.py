@@ -235,7 +235,13 @@ class GooglePhotosBackupFlowHandler(
                 # to, and dereferencing it here would raise AttributeError
                 # mid-flow.
                 return self.async_abort(reason="reauth_entry_missing")
-            self.hass.config_entries.async_update_entry(existing_entry, data=self._data)
+            # Merge, never replace: self._data only holds what the reauth
+            # flow itself collected (backend, drive-sync flag, the fresh
+            # token) - target_dir, watch_dir and every other setup field
+            # live only in the existing entry's data.
+            self.hass.config_entries.async_update_entry(
+                existing_entry, data={**existing_entry.data, **data}
+            )
             await self.hass.config_entries.async_reload(existing_entry.entry_id)
             return self.async_abort(reason="reauth_successful")
 
