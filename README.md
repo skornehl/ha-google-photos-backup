@@ -263,6 +263,17 @@ once.
    configurable safety cap (`takeout_curl_max_files`, default 100).
    Already-downloaded files are skipped on a later run.
 
+**Treat the pasted command like a password.** It contains your Google
+account's browser session cookies - whoever gets hold of it can act as you
+on Google for as long as those cookies stay valid, which can be much
+longer than the download itself keeps working. Home Assistant stores it
+unencrypted in `.storage/core.config_entries`, so it is also part of every
+Home Assistant backup. The integration only accepts commands whose URL is
+`https://` on a Google host (`takeout.google.com`,
+`*.usercontent.google.com`, ...), only ever sends the cookies there, and
+strips the field from diagnostics exports. Clear the field again once an
+export has been fully downloaded if you don't need it any more.
+
 **When the session expires** (~1 hour, or if Google was never actually
 signed in to that captured request): the run stops, reports a clear error
 naming the file it got stuck on, and raises a **repair issue** under

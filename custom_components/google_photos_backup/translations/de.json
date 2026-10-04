@@ -81,7 +81,8 @@
     "error": {
       "cannot_connect": "Verbindung fehlgeschlagen",
       "invalid_auth": "Ungültige Anmeldedaten",
-      "unknown": "Unerwarteter Fehler"
+      "unknown": "Unerwarteter Fehler",
+      "invalid_curl_session": "Dieser Befehl ist nicht verwendbar: Er braucht ein Cookie und eine https://-Download-URL auf einem Google-Host (takeout.google.com / *.usercontent.google.com). Kopiere die Download-Anfrage erneut im DevTools-Netzwerk-Tab (Als cURL / Als PowerShell kopieren) und füge sie unverändert ein."
     },
     "abort": {
       "already_configured": "Diese Instanz ist bereits konfiguriert",
@@ -107,6 +108,9 @@
           "takeout_curl_max_files": "Maximale Archivnummer (Sicherheitsgrenze)"
         }
       }
+    },
+    "error": {
+      "invalid_curl_session": "Dieser Befehl ist nicht verwendbar: Er braucht ein Cookie und eine https://-Download-URL auf einem Google-Host (takeout.google.com / *.usercontent.google.com). Kopiere die Download-Anfrage erneut im DevTools-Netzwerk-Tab (Als cURL / Als PowerShell kopieren) und füge sie unverändert ein."
     }
   },
   "selector": {
@@ -188,6 +192,9 @@
               "takeout_curl_session": "cURL-/PowerShell-Befehl"
             }
           }
+        },
+        "error": {
+          "invalid_curl_session": "Dieser Befehl ist nicht verwendbar: Er braucht ein Cookie und eine https://-Download-URL auf einem Google-Host (takeout.google.com / *.usercontent.google.com). Kopiere die Download-Anfrage erneut im DevTools-Netzwerk-Tab (Als cURL / Als PowerShell kopieren) und füge sie unverändert ein."
         }
       }
     }

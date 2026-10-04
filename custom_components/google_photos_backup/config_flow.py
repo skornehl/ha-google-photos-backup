@@ -19,6 +19,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import config_entry_oauth2_flow, selector
 
 from .backends import scopes_for_backend
+from .backends.curl_session import parse_curl_session
 from .const import (
     BACKEND_LIBRARY_API,
     BACKEND_RCLONE,
@@ -90,6 +91,17 @@ def _common_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ): vol.All(vol.Coerce(int), vol.Range(min=0)),
         }
     )
+
+
+def _validate_curl_session(user_input: dict[str, Any]) -> dict[str, str]:
+    """Form errors for an optional pasted cURL/PowerShell command: empty is
+    fine (the feature is off), anything else has to parse - catching it
+    here instead of at the next scheduled run, where it would only show up
+    as a line on the last_error sensor."""
+    raw = (user_input.get(CONF_TAKEOUT_CURL_SESSION) or "").strip()
+    if raw and parse_curl_session(raw) is None:
+        return {CONF_TAKEOUT_CURL_SESSION: "invalid_curl_session"}
+    return {}
 
 
 def _takeout_schema(*, drive_enabled: bool, defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -307,22 +319,34 @@ class GooglePhotosBackupFlowHandler(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Plain-takeout path: no Drive sync, so no OAuth needed."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._data.update(user_input)
-            return await self._async_finalize_entry("Google Photos Backup (Takeout)")
+            errors = _validate_curl_session(user_input)
+            if not errors:
+                self._data.update(user_input)
+                return await self._async_finalize_entry("Google Photos Backup (Takeout)")
         return self.async_show_form(
-            step_id="takeout", data_schema=_takeout_schema(drive_enabled=False)
+            step_id="takeout",
+            data_schema=_takeout_schema(drive_enabled=False, defaults=user_input),
+            errors=errors,
         )
 
     async def async_step_takeout_drive_options(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Takeout-with-Drive-sync path: reached after OAuth succeeds."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._data.update(user_input)
-            return await self._async_finalize_entry("Google Photos Backup (Takeout + Drive sync)")
+            errors = _validate_curl_session(user_input)
+            if not errors:
+                self._data.update(user_input)
+                return await self._async_finalize_entry(
+                    "Google Photos Backup (Takeout + Drive sync)"
+                )
         return self.async_show_form(
-            step_id="takeout_drive_options", data_schema=_takeout_schema(drive_enabled=True)
+            step_id="takeout_drive_options",
+            data_schema=_takeout_schema(drive_enabled=True, defaults=user_input),
+            errors=errors,
         )
 
     async def _async_finalize_entry(self, title: str) -> ConfigFlowResult:
@@ -369,8 +393,11 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            errors = _validate_curl_session(user_input)
+            if not errors:
+                return self.async_create_entry(title="", data=user_input)
 
         def _current(key: str, default: Any) -> Any:
             return self.config_entry.options.get(key, self.config_entry.data.get(key, default))
@@ -441,4 +468,6 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
                     )
                 ] = bool
 
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))
+        return self.async_show_form(
+            step_id="init", data_schema=vol.Schema(schema_dict), errors=errors
+        )

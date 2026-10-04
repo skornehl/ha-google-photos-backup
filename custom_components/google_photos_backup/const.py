@@ -182,6 +182,12 @@ SERVICE_START_PICKER_SESSION: Final = "start_picker_session"
 # entity. Throttle so a backup run doesn't flood the recorder.
 PROGRESS_MIN_INTERVAL_SECONDS: Final = 5.0
 
+# Errors kept per run on the last_error sensor's attributes and in the
+# persisted state. A run where every file fails would otherwise produce
+# thousands of entries - HA's recorder refuses to store state attributes
+# above 16 KiB, and nobody reads past the first few dozen anyway.
+MAX_REPORTED_ERRORS: Final = 50
+
 ATTR_LAST_SYNC: Final = "last_sync"
 ATTR_FILES_BACKED_UP: Final = "files_backed_up"
 ATTR_LAST_ERROR: Final = "last_error"

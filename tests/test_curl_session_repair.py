@@ -54,7 +54,10 @@ async def test_fix_flow_saves_the_new_session_and_returns_it(hass):
     form = await flow.async_step_init()
     assert form["step_id"] == "confirm"
 
-    new_session = "curl 'https://example/download/takeout-x-1-001.zip' -H 'cookie: SID=fresh'"
+    new_session = (
+        "curl 'https://takeout-download.usercontent.google.com/download/"
+        "takeout-x-1-001.zip' -H 'cookie: SID=fresh'"
+    )
     result = await flow.async_step_confirm({CONF_TAKEOUT_CURL_SESSION: new_session})
 
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY

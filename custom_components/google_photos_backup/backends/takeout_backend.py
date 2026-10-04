@@ -293,8 +293,9 @@ class TakeoutBackend(BackupBackend):
         session_info = parse_curl_session(raw)
         if session_info is None:
             stats.errors.append(
-                "Could not parse takeout_curl_session - paste the full cURL "
-                "or PowerShell command exactly as copied from DevTools "
+                "Could not parse takeout_curl_session - it needs a cookie and "
+                "an https:// download URL on a Google host. Paste the full "
+                "cURL or PowerShell command exactly as copied from DevTools "
                 "(Network tab, right-click the Download request, "
                 "Copy as cURL/Copy as PowerShell). See README."
             )

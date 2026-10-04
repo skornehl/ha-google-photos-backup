@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 _POWERSHELL_INDICATORS = (
     "Invoke-WebRequest",
@@ -48,6 +49,21 @@ _POWERSHELL_INDICATORS = (
 # (e.g. `takeout-20260923T121036Z-1-003.zip`), optionally followed by a query
 # string. `<seq>` is what changes from file to file within one export.
 _FILENAME_PATTERN = re.compile(r"(.*takeout-[^/?]+?-)(\d{3})(\.\w+)$")
+
+# The pasted command carries the user's Google account session cookies,
+# and every derived request sends them along - so the URL they go to has
+# to be Google's own, over TLS. Anything else (a typo, a command copied
+# from the wrong tab, a tampered snippet) would hand the cookies to
+# whoever runs that host.
+_ALLOWED_HOST_SUFFIXES = (".google.com", ".googleusercontent.com")
+
+
+def is_allowed_download_url(url: str) -> bool:
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and (
+        host == "google.com" or host.endswith(_ALLOWED_HOST_SUFFIXES)
+    )
 
 
 @dataclass(frozen=True)
@@ -122,8 +138,9 @@ def parse_curl_session(text: str) -> CurlSession | None:
     """Parse a pasted cURL or PowerShell "copy as" command.
 
     Returns None if the text doesn't look like a usable Takeout download
-    request (missing cookie, missing URL, or a URL that doesn't match
-    Google's split-archive filename pattern) - callers should surface
+    request (missing cookie, missing URL, a URL that isn't https:// on a
+    Google host, or one that doesn't match Google's split-archive
+    filename pattern) - callers should surface
     that as a clear, actionable error rather than a bare parse failure.
     """
     text = text.strip()
@@ -133,7 +150,7 @@ def parse_curl_session(text: str) -> CurlSession | None:
     powershell = _is_powershell(text)
     cookie = _cookie_from_powershell(text) if powershell else _cookie_from_curl(text)
     url = _url_from_powershell(text) if powershell else _url_from_curl(text)
-    if not cookie or not url:
+    if not cookie or not url or not is_allowed_download_url(url):
         return None
 
     url_path, _, query_string = url.partition("?")
