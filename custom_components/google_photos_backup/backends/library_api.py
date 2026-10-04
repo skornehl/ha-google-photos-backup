@@ -109,19 +109,18 @@ class LibraryApiBackend(BackupBackend):
         return picker_uri
 
     async def async_run_backup(self) -> BackupStats:
-        """Downloads run strictly sequentially, one item at a time.
+        """Finish a pending picker session, then sync app-created items.
 
-        Deliberate, not an oversight (see issue #20): concurrency here
-        would need to share a single bandwidth budget across workers to
-        keep the bandwidth_limit_kbps option meaningful (throttle.py's
-        pacer is per-download), and would multiply the request rate
-        against an API whose rate limits aren't documented in a way we
-        can safely tune against. Sequential is slower for very large
-        picker selections but predictable, and it keeps the throttle
-        semantics honest. Revisit with an explicit semaphore + shared
-        pacer if that ever becomes the actual bottleneck.
+        Picker downloads run concurrently (download_concurrency, issue
+        #20) with one shared BandwidthPacer, so bandwidth_limit_kbps stays
+        a total across workers - see _finish_pending_picker_session.
         """
         stats = BackupStats()
+        # Outside every try/except below on purpose: those turn any error
+        # into a stats.errors line, which would also swallow a revoked or
+        # expired grant. Raised from here, the coordinator maps it to
+        # ConfigEntryAuthFailed and HA starts the reauth flow.
+        await self._oauth.async_ensure_token_valid()
         await self._finish_pending_picker_session(stats)
         await self._sync_app_created_items(stats)
         return stats
