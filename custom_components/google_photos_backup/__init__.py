@@ -30,9 +30,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await coordinator.async_setup()
     except ValueError as err:
-        # Backend validation failures (missing binary, bad path, ...) are
-        # configuration problems, not transient - surface them plainly
-        # instead of endlessly retrying async_setup_entry.
+        # Backend validation failures (missing binary, bad path, ...).
+        # ConfigEntryNotReady makes HA retry setup with backoff and show the
+        # message on the entry - right for the common case of a network
+        # mount or USB disk that simply isn't there yet at boot.
         raise ConfigEntryNotReady(str(err)) from err
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
