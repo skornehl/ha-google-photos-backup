@@ -197,6 +197,10 @@ PROGRESS_MIN_INTERVAL_SECONDS: Final = 5.0
 # above 16 KiB, and nobody reads past the first few dozen anyway.
 MAX_REPORTED_ERRORS: Final = 50
 
+# Minimum gap between free-space refreshes while a run is in progress (the
+# target is often a network mount, so not on every progress tick).
+FREE_SPACE_REFRESH_SECONDS: Final = 300
+
 ATTR_LAST_SYNC: Final = "last_sync"
 ATTR_FILES_BACKED_UP: Final = "files_backed_up"
 ATTR_LAST_ERROR: Final = "last_error"

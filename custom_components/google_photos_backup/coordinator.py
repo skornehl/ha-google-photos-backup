@@ -21,6 +21,7 @@ from .const import (
     CONF_TARGET_DIR,
     DEFAULT_SYNC_INTERVAL_MINUTES,
     DOMAIN,
+    FREE_SPACE_REFRESH_SECONDS,
     MAX_REPORTED_ERRORS,
     PROGRESS_MIN_INTERVAL_SECONDS,
     STATE_SAVE_DELAY_SECONDS,
@@ -125,6 +126,13 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._speed_tracker_bytes = 0
         self._speed_tracker_at = 0.0
         self._download_speed_bps = 0.0
+        # Free space is refreshed at setup, at the end of every run and -
+        # throttled - while a run is going: a large first import runs for
+        # days, and "unknown" all that time is exactly when the number
+        # matters most.
+        self._free_space_bytes: int | None = None
+        self._free_space_checked_at: float | None = None
+        self._free_space_refreshing = False
 
     @property
     def state_data(self) -> dict[str, Any]:
@@ -151,6 +159,40 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
                     f"Google authorisation invalid or revoked ({err.status})"
                 ) from err
             raise
+        await self._async_refresh_free_space()
+
+    async def _async_refresh_free_space(self) -> None:
+        """Blocking statvfs on a possibly network-mounted target, so always
+        in the executor. A failure keeps the last known value."""
+        target_dir = self.entry.data.get(CONF_TARGET_DIR)
+        if not target_dir:
+            return
+        self._free_space_refreshing = True
+        try:
+            self._free_space_bytes = await self.hass.async_add_executor_job(
+                free_bytes, target_dir
+            )
+        except OSError as err:
+            _LOGGER.debug("Could not determine free disk space: %s", err)
+        finally:
+            self._free_space_checked_at = self.hass.loop.time()
+            self._free_space_refreshing = False
+
+    def _maybe_refresh_free_space(self, now: float) -> None:
+        """Kick off a background refresh if the last one is old enough. Runs
+        detached so a slow mount never delays the progress update itself;
+        the new value shows up with the next tick."""
+        if self._free_space_refreshing:
+            return
+        if (
+            self._free_space_checked_at is not None
+            and now - self._free_space_checked_at < FREE_SPACE_REFRESH_SECONDS
+        ):
+            return
+        self._free_space_refreshing = True
+        self.hass.async_create_background_task(
+            self._async_refresh_free_space(), f"{DOMAIN}_{self.entry.entry_id}_free_space"
+        )
 
     def _request_state_save(self) -> None:
         """Debounced mid-run save, see SyncStateStore.request_save. The delay
@@ -169,6 +211,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         if now - self._last_progress_at < PROGRESS_MIN_INTERVAL_SECONDS:
             return
         self._update_download_speed(stats, now)
+        self._maybe_refresh_free_space(now)
         self._last_progress_at = now
         self.async_set_updated_data(self._build_data(stats, in_progress=True))
 
@@ -198,9 +241,8 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._speed_tracker_at = now
 
     def _build_data(self, stats: BackupStats, *, in_progress: bool) -> BackupData:
-        """Snapshot for the sensors. free_space is only refreshed at the end
-        of a run - it needs a blocking stat() on a possibly network-mounted
-        path, which isn't worth doing on every progress tick."""
+        """Snapshot for the sensors. free_space comes from the last
+        (throttled) refresh, see _maybe_refresh_free_space."""
         last_sync_raw = self._state_data.get("last_sync")
         return BackupData(
             last_sync=datetime.fromisoformat(last_sync_raw) if last_sync_raw else None,
@@ -208,7 +250,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             last_run_files_downloaded=stats.files_downloaded,
             last_run_files_skipped=stats.files_skipped,
             last_run_errors=sanitize_errors(stats.errors),
-            free_space_bytes=self.data.free_space_bytes if self.data else None,
+            free_space_bytes=self._free_space_bytes,
             in_progress=in_progress,
             download_archive=stats.download_archive,
             download_bytes_done=stats.download_bytes_done,
@@ -246,14 +288,7 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         errors = sanitize_errors(stats.errors)
         self._state_data["last_errors"] = errors
         await self._store.async_save(self._state_data)
-
-        target_dir = self.entry.data.get(CONF_TARGET_DIR)
-        free = None
-        if target_dir:
-            try:
-                free = await self.hass.async_add_executor_job(free_bytes, target_dir)
-            except OSError as err:
-                _LOGGER.debug("Could not determine free disk space: %s", err)
+        await self._async_refresh_free_space()
 
         return BackupData(
             last_sync=datetime.fromisoformat(self._state_data["last_sync"]),
@@ -261,6 +296,6 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             last_run_files_downloaded=stats.files_downloaded,
             last_run_files_skipped=stats.files_skipped,
             last_run_errors=errors,
-            free_space_bytes=free,
+            free_space_bytes=self._free_space_bytes,
             in_progress=False,
         )

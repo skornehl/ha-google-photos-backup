@@ -210,12 +210,17 @@ through this exact rclone remote - see rclone docs
    also be changed later via Configure, no need to remove and re-add the
    integration for it.
 5. The integration unpacks every new archive **into a temporary folder
-   under the target directory itself** (not the OS's default temp
+   under the target directory itself**, in the hidden `.gpb_tmp/`
+   subfolder (not the OS's default temp
    location - Home Assistant OS mounts `/tmp` as tmpfs, RAM-backed and
    usually far smaller than an archive; confirmed in practice 2026-09-24
    that this fails a 50 GB+ archive even with terabytes free on the
-   target disk), files media chronologically into `YYYY/YYYY-MM/` based
-   on the `<file>.json` sidecar (`photoTakenTime`), and skips
+   target disk). If a run is interrupted mid-import (restart, reload),
+   the leftover folder is removed at the start of the next run - the
+   archive itself is still there and is imported again. The integration
+   then files media chronologically into `YYYY/YYYY-MM/` based
+   on the `<file>.json` sidecar (`photoTakenTime`; edited copies such as
+   `IMG_1-edited.jpg` / `-bearbeitet.jpg` use the original's), and skips
    already-imported files (SHA-256 hash comparison, consistent across
    backends). Every file in the archive is imported except Takeout's own
    metadata (`.json` sidecars, `archive_browser.html`) - RAW, `.mkv`,

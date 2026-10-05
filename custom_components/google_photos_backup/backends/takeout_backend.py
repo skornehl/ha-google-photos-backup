@@ -128,6 +128,18 @@ SIDECAR_PATTERNS = (
 )
 # "IMG_1(1).jpg" -> ("IMG_1", "1", ".jpg"), see _find_sidecar.
 _DUPLICATE_NAME = re.compile(r"^(.*)\((\d+)\)(\.[^.]+)$")
+# Suffix Google Photos appends to an edited copy, per export language. The
+# edited copy has no sidecar of its own - it shares the original's.
+_EDITED_NAME = re.compile(
+    r"^(.*)-(?:edited|bearbeitet|bewerkt|modifié|modificato|editado|redigerad)(\.[^.]+)$",
+    re.IGNORECASE,
+)
+
+# Extraction happens in a TemporaryDirectory under target_dir/EXTRACT_PARENT
+# (see _import_archive). Older versions created EXTRACT_PREFIX dirs directly
+# in target_dir; _cleanup_stale_extract_dirs removes leftovers from both.
+EXTRACT_PARENT = ".gpb_tmp"
+EXTRACT_PREFIX = "gpb_takeout_"
 
 
 class TakeoutBackend(BackupBackend):
@@ -188,6 +200,9 @@ class TakeoutBackend(BackupBackend):
         for archive in pre_existing:
             queue.put_nowait(archive)
         stats.archives_total = len(pre_existing)
+        # Runs are serialized per entry, so any extraction dir still on disk
+        # at this point belongs to a run that was interrupted.
+        await self.hass.async_add_executor_job(_cleanup_stale_extract_dirs, Path(target_dir))
 
         async def _produce() -> None:
             try:
@@ -675,16 +690,21 @@ class TakeoutBackend(BackupBackend):
     # -- archive import (blocking, runs in executor) -------------------------
 
     def _import_archive(self, archive: Path, target_dir: str, stats: BackupStats) -> None:
-        # dir=target_dir deliberately, NOT the OS default tmp location:
-        # Home Assistant OS mounts /tmp as tmpfs (RAM-backed), which is
-        # nowhere near big enough for a 50 GB+ Takeout archive regardless
-        # of how much space the actual target disk has (confirmed
-        # 2026-09-24: extraction failed with "only 3918 MiB available"
-        # while the target disk had 1.6+ TB free). Extracting directly
+        # Extracted under target_dir deliberately, NOT the OS default tmp
+        # location: Home Assistant OS mounts /tmp as tmpfs (RAM-backed),
+        # which is nowhere near big enough for a 50 GB+ Takeout archive
+        # regardless of how much space the actual target disk has
+        # (confirmed 2026-09-24: extraction failed with "only 3918 MiB
+        # available" while the target disk had 1.6+ TB free). Extracting
         # on target_dir's filesystem also means the final shutil.move()
         # below is a same-filesystem rename instead of a slow
         # cross-filesystem copy when target_dir is a network mount.
-        with tempfile.TemporaryDirectory(prefix="gpb_takeout_", dir=target_dir) as tmp:
+        # Inside the hidden EXTRACT_PARENT rather than directly in
+        # target_dir, so a half-extracted archive never shows up as an
+        # album in photo viewers - see _cleanup_stale_extract_dirs.
+        parent = Path(target_dir) / EXTRACT_PARENT
+        parent.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=EXTRACT_PREFIX, dir=parent) as tmp:
             tmp_path = Path(tmp)
             self._check_free_space(archive, tmp_path)
             self._extract(archive, tmp_path, stats)
@@ -878,6 +898,17 @@ class TakeoutBackend(BackupBackend):
                 if candidate.is_file():
                     return candidate
 
+        # Edited copies ("IMG_1-edited.jpg", "-bearbeitet" in German
+        # exports) have no sidecar of their own; they share the original's.
+        # The prefix fallback below only finds it when the original's name
+        # shares 8+ characters, so e.g. "EFFECTS-bearbeitet.jpg" missed it.
+        # (It can't help when Takeout put the sidecar into a different
+        # split archive than the media file - nothing here can.)
+        edited = _EDITED_NAME.match(media_file.name)
+        if edited is not None:
+            original = Path(media_file.parent, "".join(edited.groups()))
+            return TakeoutBackend._find_sidecar(original, json_candidates)
+
         # Truncated-filename fallback: Takeout sometimes shortens the
         # sidecar's stem so it no longer matches the media filename
         # exactly. Pick the *.json in the same directory whose name shares
@@ -913,6 +944,28 @@ def _drive_query_literal(value: str) -> str:
     breaks out of the literal and changes the query."""
     escaped = value.replace("\\", "\\\\").replace("'", "\\'")
     return f"'{escaped}'"
+
+
+def _cleanup_stale_extract_dirs(target_dir: Path) -> None:
+    """Remove extraction dirs left behind by an interrupted run (HA restart
+    or reload mid-import: TemporaryDirectory's cleanup never ran).
+
+    Safe to delete: an archive is only marked processed - and only then
+    deleted with takeout_delete_after_import - once its import completed,
+    so whatever an interrupted extraction held is still in its archive and
+    gets imported again from there. Its contents can also be partial (the
+    member being written when the run died is truncated), so importing
+    from these dirs instead would be wrong.
+    """
+    candidates = [*target_dir.glob(f"{EXTRACT_PREFIX}*")]
+    parent = target_dir / EXTRACT_PARENT
+    if parent.is_dir():
+        candidates += parent.glob(f"{EXTRACT_PREFIX}*")
+    for path in candidates:
+        if not path.is_dir() or path.is_symlink():
+            continue
+        _LOGGER.warning("Removing leftover extraction directory from an interrupted run: %s", path)
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _is_takeout_content(path: Path) -> bool:
