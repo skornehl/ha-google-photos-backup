@@ -46,10 +46,11 @@ def test_extraction_temp_dir_is_created_under_target_dir(monkeypatch, tmp_path: 
 
     assert len(seen_extract_dirs) == 1
     extract_dir = seen_extract_dirs[0]
-    # The whole point: the temp extraction dir must be a child of
-    # target_dir (same filesystem), not somewhere under the system temp
-    # root (which would resolve to /tmp - tmpfs on Home Assistant OS).
-    assert extract_dir.parent == target
+    # The whole point: the temp extraction dir must live under target_dir
+    # (same filesystem), not somewhere under the system temp root (which
+    # would resolve to /tmp - tmpfs on Home Assistant OS). Since 0.10.7 in
+    # the hidden .gpb_tmp/ so it doesn't show up as an album.
+    assert extract_dir.parent == target / ".gpb_tmp"
     assert stats.files_downloaded == 1
     assert stats.errors == []
     # And it must be gone again afterwards - TemporaryDirectory cleans up,
