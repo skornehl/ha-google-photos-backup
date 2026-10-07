@@ -164,11 +164,11 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
     async def _async_refresh_free_space(self) -> None:
         """Blocking statvfs on a possibly network-mounted target, so always
         in the executor. A failure keeps the last known value."""
-        target_dir = self.entry.data.get(CONF_TARGET_DIR)
-        if not target_dir:
-            return
         self._free_space_refreshing = True
         try:
+            target_dir = self.entry.data.get(CONF_TARGET_DIR)
+            if not target_dir:
+                return
             self._free_space_bytes = await self.hass.async_add_executor_job(
                 free_bytes, target_dir
             )

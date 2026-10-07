@@ -134,6 +134,8 @@ async def throttled_stream_to_file(
 
         await hass.async_add_executor_job(os.replace, tmp_path, dest_path)
     except BaseException:
+        if hasattr(resp, "close"):
+            resp.close()
         await hass.async_add_executor_job(tmp_path.unlink, True)
         raise
 
