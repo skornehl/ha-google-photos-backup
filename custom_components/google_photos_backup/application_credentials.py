@@ -44,5 +44,5 @@ async def async_get_description_placeholders(hass: HomeAssistant) -> dict[str, s
     return {
         "oauth_consent_url": "https://console.cloud.google.com/apis/credentials/consent",
         "more_info_url": "https://www.home-assistant.io/integrations/application_credentials/",
-        "redirect_url": config_entry_oauth2_flow.async_get_redirect_uri(hass),  # type: ignore[attr-defined]
+        "redirect_url": config_entry_oauth2_flow.async_get_redirect_uri(hass),
     }
