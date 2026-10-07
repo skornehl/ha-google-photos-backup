@@ -111,7 +111,7 @@ def _url_from_powershell(text: str) -> str | None:
 
 
 def _cookie_from_curl(text: str) -> str:
-    match = re.search(r"-H\s+['\"]Cookie:\s*([^'\"]+)['\"]", text, re.IGNORECASE)
+    match = re.search(r"(?:-H|--header)\s+['\"]Cookie:\s*([^'\"]+)['\"]", text, re.IGNORECASE)
     if match:
         return match.group(1).strip()
     match = re.search(r"(?:-b|--cookie)\s+['\"]([^'\"]+)['\"]", text)
