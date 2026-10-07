@@ -722,9 +722,13 @@ class TakeoutBackend(BackupBackend):
             stats.import_files_done = 0
             self._report_progress_threadsafe(stats)
             for i, media_file in enumerate(media_files, 1):
-                self._import_media_file(
-                    media_file, target_dir, stats, json_by_dir.get(media_file.parent, [])
-                )
+                try:
+                    self._import_media_file(
+                        media_file, target_dir, stats, json_by_dir.get(media_file.parent, [])
+                    )
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.error("Failed to import media file %s: %s", media_file, err)
+                    stats.errors.append(f"{media_file.name}: import failed ({err})")
                 stats.import_files_done = i
                 # See _extract's identical throttle for why every-50th
                 # rather than every file.
@@ -880,7 +884,7 @@ class TakeoutBackend(BackupBackend):
         quadratic."""
         directory = media_file.parent
         for pattern in SIDECAR_PATTERNS:
-            candidate = directory / pattern.format(name=media_file.name)
+            candidate = directory / pattern.replace("{name}", media_file.name)
             if candidate.is_file():
                 return candidate
 
@@ -893,7 +897,7 @@ class TakeoutBackend(BackupBackend):
         if dup is not None:
             stem, counter, suffix = dup.groups()
             for pattern in SIDECAR_PATTERNS:
-                sidecar = pattern.format(name=f"{stem}{suffix}")
+                sidecar = pattern.replace("{name}", f"{stem}{suffix}")
                 candidate = directory / f"{sidecar[: -len('.json')]}({counter}).json"
                 if candidate.is_file():
                     return candidate

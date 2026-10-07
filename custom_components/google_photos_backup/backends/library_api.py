@@ -97,6 +97,7 @@ class LibraryApiBackend(BackupBackend):
         #: enough while downloads overlap.
         self._reserved_destinations: set[Path] = set()
         self._reserve_lock = asyncio.Lock()
+        self._processed_ids_set: set[str] | None = None
 
     async def async_validate(self) -> None:
         target_dir = self.entry.data[CONF_TARGET_DIR]
@@ -335,8 +336,10 @@ class LibraryApiBackend(BackupBackend):
             stats.errors.append("Picker item without an id in the response - skipped")
             return
 
-        processed_ids: list[str] = self.state.get("processed_ids", [])
-        if item_id in processed_ids:
+        if self._processed_ids_set is None:
+            self._processed_ids_set = set(self.state.get("processed_ids", []))
+
+        if item_id in self._processed_ids_set:
             stats.files_skipped += 1
             return
 
@@ -402,7 +405,10 @@ class LibraryApiBackend(BackupBackend):
 
         await self.hass.async_add_executor_job(_set_mtime)
 
+        processed_ids: list[str] = self.state.get("processed_ids", [])
         processed_ids.append(item_id)
+        if self._processed_ids_set is not None:
+            self._processed_ids_set.add(item_id)
         self.state.set("processed_ids", processed_ids)
         self.state.request_save()
         stats.files_downloaded += 1
