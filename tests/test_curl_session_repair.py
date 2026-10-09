@@ -6,6 +6,8 @@ registry tests that focus on *when* the issue is raised/cleared instead).
 """
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from homeassistant import data_entry_flow
 from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -30,17 +32,21 @@ def _entry(hass) -> MockConfigEntry:
     return entry
 
 
-async def test_raise_issue_creates_a_real_registry_entry(hass):
+async def test_raise_issue_creates_a_real_registry_entry_and_notification(hass):
     entry = _entry(hass)
     backend = TakeoutBackend(hass, entry, SyncStateStore({}))
 
-    backend._raise_curl_session_expired_issue()
+    with patch("homeassistant.components.persistent_notification.async_create") as mock_create:
+        backend._raise_curl_session_expired_issue()
 
-    issue = ir.async_get(hass).async_get_issue(DOMAIN, _curl_session_issue_id(entry.entry_id))
-    assert issue is not None
-    assert issue.is_fixable is True
-    assert issue.translation_key == "curl_session_expired"
-    assert issue.data == {"entry_id": entry.entry_id}
+        issue = ir.async_get(hass).async_get_issue(DOMAIN, _curl_session_issue_id(entry.entry_id))
+        assert issue is not None
+        assert issue.is_fixable is True
+        assert issue.translation_key == "curl_session_expired"
+        assert issue.data == {"entry_id": entry.entry_id}
+
+        mock_create.assert_called_once()
+        assert mock_create.call_args[1]["notification_id"] == f"{DOMAIN}_curl_{entry.entry_id}"
 
 
 async def test_fix_flow_saves_the_new_session_and_returns_it(hass):

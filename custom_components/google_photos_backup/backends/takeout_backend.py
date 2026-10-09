@@ -66,6 +66,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow
@@ -418,8 +419,9 @@ class TakeoutBackend(BackupBackend):
                     )
                     # A chunk just downloaded successfully with this
                     # cookie - any previously-raised "session expired"
-                    # repair issue no longer applies. async_delete_issue
-                    # is a no-op if there is nothing to delete.
+                    # repair issue and persistent notification no longer apply.
+                    notification_id = f"{DOMAIN}_curl_{self.entry.entry_id}"
+                    persistent_notification.async_dismiss(self.hass, notification_id)
                     ir.async_delete_issue(
                         self.hass, DOMAIN, _curl_session_issue_id(self.entry.entry_id)
                     )
@@ -446,6 +448,14 @@ class TakeoutBackend(BackupBackend):
             translation_key="curl_session_expired",
             translation_placeholders={"title": self.entry.title},
             data={"entry_id": self.entry.entry_id},
+        )
+        persistent_notification.async_create(
+            self.hass,
+            f"Google Takeout browser session expired for '{self.entry.title}'. "
+            "Please copy a fresh cURL or PowerShell command from DevTools on takeout.google.com "
+            "and update it under System -> Repairs or in the integration options.",
+            title="Google Photos Backup: session expired",
+            notification_id=f"{DOMAIN}_curl_{self.entry.entry_id}",
         )
 
     def _list_new_archives(self, watch_dir: Path) -> list[Path]:
