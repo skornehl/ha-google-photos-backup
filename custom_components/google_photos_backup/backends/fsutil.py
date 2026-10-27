@@ -14,6 +14,8 @@ from collections.abc import Container
 from datetime import datetime
 from pathlib import Path
 
+from homeassistant.util import dt as dt_util
+
 CHUNK_SIZE = 1024 * 1024
 
 
@@ -46,8 +48,14 @@ def sha256_file(path: Path) -> str:
 
 
 def dest_dir_for_date(target_dir: str, taken_at: datetime) -> Path:
-    """YYYY/YYYY-MM/ layout, e.g. 2026/2026-08/."""
-    return Path(target_dir) / f"{taken_at.year:04d}" / f"{taken_at.year:04d}-{taken_at.month:02d}"
+    """YYYY/YYYY-MM/ layout, e.g. 2026/2026-08/.
+
+    By the date in Home Assistant's time zone, not UTC: a photo taken
+    shortly after midnight on the 1st belongs to that month, not the
+    previous one. (Takeout and the Photos APIs report UTC.)
+    """
+    local = dt_util.as_local(taken_at)
+    return Path(target_dir) / f"{local.year:04d}" / f"{local.year:04d}-{local.month:02d}"
 
 
 def unique_destination(

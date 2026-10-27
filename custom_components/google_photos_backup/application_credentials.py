@@ -42,7 +42,13 @@ async def async_get_auth_implementation(
 
 async def async_get_description_placeholders(hass: HomeAssistant) -> dict[str, str]:
     get_redirect_uri = getattr(config_entry_oauth2_flow, "async_get_redirect_uri", None)
-    redirect_url = get_redirect_uri(hass) if get_redirect_uri is not None else ""
+    # async_get_redirect_uri only exists since HA 2025.2; older versions use
+    # the My Home Assistant redirect, which is what this falls back to.
+    redirect_url = (
+        get_redirect_uri(hass)
+        if get_redirect_uri is not None
+        else "https://my.home-assistant.io/redirect/oauth"
+    )
     return {
         "oauth_consent_url": "https://console.cloud.google.com/apis/credentials/consent",
         "more_info_url": "https://www.home-assistant.io/integrations/application_credentials/",

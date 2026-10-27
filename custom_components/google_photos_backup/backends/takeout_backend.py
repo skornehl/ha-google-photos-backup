@@ -60,6 +60,7 @@ import re
 import shutil
 import tarfile
 import tempfile
+import threading
 import zipfile
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -110,6 +111,17 @@ _LOGGER = logging.getLogger(__name__)
 def _curl_session_issue_id(entry_id: str) -> str:
     return f"curl_session_expired_{entry_id}"
 
+
+def curl_session_notification_id(entry_id: str) -> str:
+    return f"{DOMAIN}_curl_{entry_id}"
+
+
+def clear_curl_session_expired(hass: HomeAssistant, entry_id: str) -> None:
+    """Withdraw the "session expired" repair issue and notification - after
+    a successful download, or once the user has pasted a new session."""
+    persistent_notification.async_dismiss(hass, curl_session_notification_id(entry_id))
+    ir.async_delete_issue(hass, DOMAIN, _curl_session_issue_id(entry_id))
+
 # Takeout's own non-media files: JSON sidecars (per item, per album
 # `metadata.json`, `print-subscriptions.json`, ...) and the
 # `archive_browser.html` index at the archive root. Everything else in a
@@ -142,6 +154,21 @@ _EDITED_NAME = re.compile(
 EXTRACT_PARENT = ".gpb_tmp"
 EXTRACT_PREFIX = "gpb_takeout_"
 
+# How long unload/reload waits for an import running in the executor to
+# notice the stop request (checked per archive member and per moved file).
+IMPORT_STOP_TIMEOUT_SECONDS = 120
+
+
+class ImportStopped(Exception):
+    """The entry is being unloaded - the archive stays unprocessed and is
+    imported again by the next run."""
+
+
+class IncompleteImport(Exception):
+    """Some files of an archive could not be imported. The archive is not
+    marked processed (and so never deleted), so the next run retries it;
+    files that did make it are skipped there via processed_hashes."""
+
 
 class TakeoutBackend(BackupBackend):
     # Only relevant when Drive sync is enabled - the plain-takeout path
@@ -162,6 +189,28 @@ class TakeoutBackend(BackupBackend):
         backends/__init__.py::async_create_backend."""
         super().__init__(hass, entry, state, on_progress)
         self._oauth = oauth_session
+        # Executor threads can't be cancelled: when the entry unloads while
+        # an archive is being extracted/moved, the run task is cancelled but
+        # the import thread would keep going - moving files the reloaded
+        # entry imports a second time, out of a directory that entry's
+        # stale-dir cleanup deletes underneath it. async_terminate sets
+        # _stop_requested (checked by the import loops) and waits on
+        # _import_idle until the thread has actually returned.
+        self._stop_requested = threading.Event()
+        self._import_idle = threading.Event()
+        self._import_idle.set()
+
+    async def async_terminate(self) -> None:
+        """Stop an in-flight archive import and wait until its thread is done."""
+        self._stop_requested.set()
+        finished = await self.hass.async_add_executor_job(
+            self._import_idle.wait, IMPORT_STOP_TIMEOUT_SECONDS
+        )
+        if not finished:
+            _LOGGER.warning(
+                "Archive import did not stop within %ss of unload",
+                IMPORT_STOP_TIMEOUT_SECONDS,
+            )
 
     async def async_validate(self) -> None:
         target_dir = self.entry.data[CONF_TARGET_DIR]
@@ -268,6 +317,8 @@ class TakeoutBackend(BackupBackend):
                 except Exception as err:  # noqa: BLE001
                     stats.errors.append(f"{archive.name}: {err}")
                     _reset_extract_progress(stats)
+                    if self._stop_requested.is_set():
+                        return
                     continue
 
                 processed_archives: list[str] = self.state.get("processed_archives", [])
@@ -420,11 +471,7 @@ class TakeoutBackend(BackupBackend):
                     # A chunk just downloaded successfully with this
                     # cookie - any previously-raised "session expired"
                     # repair issue and persistent notification no longer apply.
-                    notification_id = f"{DOMAIN}_curl_{self.entry.entry_id}"
-                    persistent_notification.async_dismiss(self.hass, notification_id)
-                    ir.async_delete_issue(
-                        self.hass, DOMAIN, _curl_session_issue_id(self.entry.entry_id)
-                    )
+                    clear_curl_session_expired(self.hass, self.entry.entry_id)
             except Exception as err:  # noqa: BLE001 - surfaced via sensor
                 stats.errors.append(f"{name}: {err}")
                 stats.download_archive = None
@@ -438,6 +485,12 @@ class TakeoutBackend(BackupBackend):
         stats.download_archive = None
 
     def _raise_curl_session_expired_issue(self) -> None:
+        issue_id = _curl_session_issue_id(self.entry.entry_id)
+        # Notify once per expiry, not on every scheduled run while the
+        # (persistent) repair issue is still open. The notification is
+        # dismissed again by the repair flow, the options flow and the next
+        # successful download, see dismiss_curl_session_notification.
+        already_raised = ir.async_get(self.hass).async_get_issue(DOMAIN, issue_id) is not None
         ir.async_create_issue(
             self.hass,
             DOMAIN,
@@ -449,13 +502,15 @@ class TakeoutBackend(BackupBackend):
             translation_placeholders={"title": self.entry.title},
             data={"entry_id": self.entry.entry_id},
         )
+        if already_raised:
+            return
         persistent_notification.async_create(
             self.hass,
             f"Google Takeout browser session expired for '{self.entry.title}'. "
             "Please copy a fresh cURL or PowerShell command from DevTools on takeout.google.com "
             "and update it under System -> Repairs or in the integration options.",
             title="Google Photos Backup: session expired",
-            notification_id=f"{DOMAIN}_curl_{self.entry.entry_id}",
+            notification_id=curl_session_notification_id(self.entry.entry_id),
         )
 
     def _list_new_archives(self, watch_dir: Path) -> list[Path]:
@@ -700,6 +755,21 @@ class TakeoutBackend(BackupBackend):
     # -- archive import (blocking, runs in executor) -------------------------
 
     def _import_archive(self, archive: Path, target_dir: str, stats: BackupStats) -> None:
+        if self._stop_requested.is_set():
+            raise ImportStopped("unload requested, import skipped")
+        self._import_idle.clear()
+        try:
+            self._import_archive_unguarded(archive, target_dir, stats)
+        finally:
+            self._import_idle.set()
+
+    def _raise_if_stopped(self) -> None:
+        if self._stop_requested.is_set():
+            raise ImportStopped("unload requested - imported again on the next run")
+
+    def _import_archive_unguarded(
+        self, archive: Path, target_dir: str, stats: BackupStats
+    ) -> None:
         # Extracted under target_dir deliberately, NOT the OS default tmp
         # location: Home Assistant OS mounts /tmp as tmpfs (RAM-backed),
         # which is nowhere near big enough for a 50 GB+ Takeout archive
@@ -731,7 +801,11 @@ class TakeoutBackend(BackupBackend):
             stats.import_files_total = len(media_files)
             stats.import_files_done = 0
             self._report_progress_threadsafe(stats)
+            failed = 0
             for i, media_file in enumerate(media_files, 1):
+                self._raise_if_stopped()
+                # One bad file must not abort the rest of the archive - but
+                # it must not be lost either: see IncompleteImport below.
                 try:
                     self._import_media_file(
                         media_file, target_dir, stats, json_by_dir.get(media_file.parent, [])
@@ -739,11 +813,17 @@ class TakeoutBackend(BackupBackend):
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.error("Failed to import media file %s: %s", media_file, err)
                     stats.errors.append(f"{media_file.name}: import failed ({err})")
+                    failed += 1
                 stats.import_files_done = i
                 # See _extract's identical throttle for why every-50th
                 # rather than every file.
                 if i % 50 == 0 or i == len(media_files):
                     self._report_progress_threadsafe(stats)
+            if failed:
+                raise IncompleteImport(
+                    f"{failed} of {len(media_files)} files could not be imported - "
+                    "the archive is kept and retried on the next run"
+                )
 
     @staticmethod
     def _check_free_space(archive: Path, extract_dir: Path) -> None:
@@ -813,6 +893,7 @@ class TakeoutBackend(BackupBackend):
                 stats.extract_files_done = 0
                 self._report_progress_threadsafe(stats)
                 for i, member in enumerate(members, 1):
+                    self._raise_if_stopped()
                     zf.extract(member, dest)
                     stats.extract_files_done = i
                     if i % 50 == 0 or i == len(members):
