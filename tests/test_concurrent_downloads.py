@@ -43,7 +43,7 @@ def _backend(tmp_path: Path, options: dict | None = None) -> LibraryApiBackend:
 def _item(item_id: str, filename: str) -> dict:
     return {
         "id": item_id,
-        "createTime": "2026-08-01T00:00:00Z",
+        "createTime": "2026-08-15T12:00:00Z",
         "mediaFile": {
             "baseUrl": f"https://example.com/{item_id}",
             "filename": filename,

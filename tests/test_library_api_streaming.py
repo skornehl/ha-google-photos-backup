@@ -19,7 +19,7 @@ from custom_components.google_photos_backup.const import CONF_TARGET_DIR
 
 _ITEM = {
     "id": "item1",
-    "createTime": "2026-08-01T00:00:00Z",
+    "createTime": "2026-08-15T12:00:00Z",
     "mediaFile": {
         "baseUrl": "https://example.com/video",
         "filename": "clip.mp4",
@@ -80,8 +80,9 @@ async def test_file_lands_in_the_date_folder_with_capture_mtime(monkeypatch, tmp
 
     written = tmp_path / "2026" / "2026-08" / "clip.mp4"
     assert written.is_file(), f"not found: {list(tmp_path.rglob('*'))}"
-    # createTime 2026-08-01T00:00:00Z -> mtime must follow it, not "now"
-    assert written.stat().st_mtime == 1785542400.0
+    # createTime 2026-08-15T12:00:00Z -> mtime must follow it, not "now"
+    # (mid-month: the folder follows local time, see dest_dir_for_date)
+    assert written.stat().st_mtime == 1786795200.0
 
 
 async def test_failed_download_is_recorded_and_not_marked_processed(monkeypatch, tmp_path: Path):
