@@ -19,6 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from .backends.curl_session import parse_curl_session
+from .backends.takeout_backend import clear_curl_session_expired
 from .config_flow import _MULTILINE_TEXT
 from .const import CONF_TAKEOUT_CURL_SESSION
 
@@ -41,6 +42,9 @@ class CurlSessionExpiredRepairFlow(RepairsFlow):
             new_options = dict(self._entry.options)
             new_options[CONF_TAKEOUT_CURL_SESSION] = user_input[CONF_TAKEOUT_CURL_SESSION]
             self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            # The repairs framework removes the issue itself; the
+            # notification raised alongside it has to go too.
+            clear_curl_session_expired(self.hass, self._entry.entry_id)
             # The options-update listener (see __init__._async_update_listener)
             # reloads the entry, which is enough to pick up the new session
             # on the next run - no separate "verify now" step needed here.

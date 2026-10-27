@@ -117,6 +117,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # subprocess) before tearing down the entry, so unload/reload
         # never leaves it running detached from HA - see issue #6.
         await coordinator.backend.async_terminate()
+    if coordinator is not None:
+        # Write the state now instead of leaving a delayed save pending: a
+        # reload creates a new coordinator that loads the store right away,
+        # and an old delayed save landing after that would overwrite it.
+        await coordinator.async_save_state()
 
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
@@ -138,7 +143,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _handle_backup_now(call: ServiceCall) -> None:
         coordinator = _get_coordinator(hass, call.data["config_entry_id"])
-        await coordinator.async_request_refresh()
+        # As an entry background task, like the scheduled runs: a run can
+        # take hours, and only entry-bound tasks are cancelled when the
+        # entry unloads - a run started from the service call itself would
+        # keep downloading alongside the reloaded entry's own run.
+        coordinator.entry.async_create_background_task(
+            hass,
+            coordinator.async_request_refresh(),
+            f"{DOMAIN}_{coordinator.entry.entry_id}_backup_now",
+        )
 
     async def _handle_start_picker_session(call: ServiceCall) -> None:
         coordinator = _get_coordinator(hass, call.data["config_entry_id"])

@@ -133,6 +133,8 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._free_space_bytes: int | None = None
         self._free_space_checked_at: float | None = None
         self._free_space_refreshing = False
+        # Set on unload, see async_save_state.
+        self._state_closed = False
 
     @property
     def state_data(self) -> dict[str, Any]:
@@ -194,10 +196,19 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
             self._async_refresh_free_space(), f"{DOMAIN}_{self.entry.entry_id}_free_space"
         )
 
+    async def async_save_state(self) -> None:
+        """Final save on unload. Replaces a pending delayed save and stops
+        accepting new ones: the run being cancelled could otherwise still
+        request one that lands after the reloaded entry loaded the store."""
+        self._state_closed = True
+        await self._store.async_save(self._state_data)
+
     def _request_state_save(self) -> None:
         """Debounced mid-run save, see SyncStateStore.request_save. The delay
         coalesces a burst of finished items into one write; HA's Store also
         flushes pending delayed saves on shutdown."""
+        if self._state_closed:
+            return
         self._store.async_delay_save(lambda: self._state_data, STATE_SAVE_DELAY_SECONDS)
 
     def _handle_progress(self, stats: BackupStats) -> None:
@@ -287,7 +298,8 @@ class GooglePhotosBackupCoordinator(DataUpdateCoordinator[BackupData]):
         self._state_data["last_sync"] = datetime.now(timezone.utc).isoformat()
         errors = sanitize_errors(stats.errors)
         self._state_data["last_errors"] = errors
-        await self._store.async_save(self._state_data)
+        if not self._state_closed:
+            await self._store.async_save(self._state_data)
         await self._async_refresh_free_space()
 
         return BackupData(

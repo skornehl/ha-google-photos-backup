@@ -20,6 +20,7 @@ from homeassistant.helpers import config_entry_oauth2_flow, selector
 
 from .backends import scopes_for_backend
 from .backends.curl_session import parse_curl_session
+from .backends.takeout_backend import clear_curl_session_expired
 from .const import (
     BACKEND_LIBRARY_API,
     BACKEND_RCLONE,
@@ -394,9 +395,29 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        is_takeout = self.config_entry.data.get(CONF_BACKEND) == BACKEND_TAKEOUT
+        drive_sync = bool(self.config_entry.data.get(CONF_TAKEOUT_DRIVE_SYNC))
         if user_input is not None:
             errors = _validate_curl_session(user_input)
             if not errors:
+                # A cleared optional text field is simply missing from
+                # user_input. Store it as "" explicitly - otherwise
+                # BackupBackend._option would fall back to the value from
+                # the initial setup in entry.data, and the field could
+                # never be emptied (e.g. to switch the session off).
+                if is_takeout:
+                    user_input.setdefault(CONF_TAKEOUT_CURL_SESSION, "")
+                    if drive_sync:
+                        user_input.setdefault(CONF_TAKEOUT_DRIVE_FOLDER_ID, "")
+                    old_session = self.config_entry.options.get(
+                        CONF_TAKEOUT_CURL_SESSION,
+                        self.config_entry.data.get(CONF_TAKEOUT_CURL_SESSION, ""),
+                    )
+                    if user_input[CONF_TAKEOUT_CURL_SESSION] != old_session:
+                        # New (or no) session: the "expired" warnings refer
+                        # to the old one. A new one that doesn't work raises
+                        # them again on the next run.
+                        clear_curl_session_expired(self.hass, self.config_entry.entry_id)
                 return self.async_create_entry(title="", data=user_input)
 
         def _current(key: str, default: Any) -> Any:
@@ -424,7 +445,7 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
                     default=_current(CONF_DOWNLOAD_CONCURRENCY, DEFAULT_DOWNLOAD_CONCURRENCY),
                 )
             ] = vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_DOWNLOAD_CONCURRENCY))
-        if self.config_entry.data.get(CONF_BACKEND) == BACKEND_TAKEOUT:
+        if is_takeout:
             schema_dict[
                 vol.Optional(
                     CONF_TAKEOUT_DELETE_AFTER_IMPORT,
@@ -433,9 +454,12 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
                     ),
                 )
             ] = bool
+            # Text fields get a suggested_value instead of a default: with a
+            # default, clearing the field brings the old value back.
             schema_dict[
                 vol.Optional(
-                    CONF_TAKEOUT_CURL_SESSION, default=_current(CONF_TAKEOUT_CURL_SESSION, "")
+                    CONF_TAKEOUT_CURL_SESSION,
+                    description={"suggested_value": _current(CONF_TAKEOUT_CURL_SESSION, "")},
                 )
             ] = _MULTILINE_TEXT
             schema_dict[
@@ -444,11 +468,15 @@ class GooglePhotosBackupOptionsFlow(config_entries.OptionsFlow):
                     default=_current(CONF_TAKEOUT_CURL_MAX_FILES, DEFAULT_TAKEOUT_CURL_MAX_FILES),
                 )
             ] = vol.All(vol.Coerce(int), vol.Range(min=1))
-            if self.config_entry.data.get(CONF_TAKEOUT_DRIVE_SYNC):
+            if drive_sync:
                 schema_dict[
                     vol.Optional(
                         CONF_TAKEOUT_DRIVE_FOLDER_ID,
-                        default=_current(CONF_TAKEOUT_DRIVE_FOLDER_ID, DEFAULT_TAKEOUT_DRIVE_FOLDER_ID),
+                        description={
+                            "suggested_value": _current(
+                                CONF_TAKEOUT_DRIVE_FOLDER_ID, DEFAULT_TAKEOUT_DRIVE_FOLDER_ID
+                            )
+                        },
                     )
                 ] = str
                 schema_dict[
