@@ -23,6 +23,11 @@ silently.
   did the work.
 - **Language:** the entire source, comments and docs are **English**
   (see #69). The only German is `translations/de.json`.
+- **Releases:** tag `vX.Y.Z` with the same version in `manifest.json`. On
+  publish, `.github/workflows/release.yml` attaches `google_photos_backup.zip`
+  (the integration directory, files in the ZIP root); `hacs.json` sets
+  `zip_release`, so HACS installs from it and counts its downloads. A tag that
+  does not match the manifest gets no ZIP.
 
 ## The one thing to get right: Google's API reality
 
